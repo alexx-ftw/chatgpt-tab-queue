@@ -1,0 +1,98 @@
+# ChatGPT Queue · Tab
+
+Queue messages with **Tab**, using ChatGPT's own composer and attachment controls.
+Independent queues, a minimal in-page list only when needed, draft protection and
+signed **browser-native automatic updates**. No subscription, API key, telemetry,
+local updater, native host, background operating-system service or remote code.
+
+## Install the auto-updating release (Linux)
+
+Download **chatgpt-queue.crx** from
+[the latest release](https://github.com/alexx-ftw/chatgpt-tab-queue/releases/latest).
+Open `brave://extensions` or `chrome://extensions`, enable developer mode, and drag
+the **CRX file itself** onto that page. Accept the browser's installation prompt.
+Do **not** unzip it or select Load unpacked: that developer installation does not
+receive native package updates. A normal browser confirmation may be required.
+
+The signed extension ID is `bkodbagbbldhccflpidamkccjgacbpid`.
+Future versions are signed with the same key and delivered by the browser using
+`updates.xml` from GitHub Releases. No scheduled local download or file-copy code
+is installed. The browser chooses when to check; checks are not instantaneous.
+
+This distribution path targets Chromium/Brave on Linux. Standard Chrome on
+Windows/macOS restricts off-store installation; a Chrome Web Store release is the
+normal cross-platform alternative. This project does not modify browser policies.
+
+## Moving from an older unpacked copy (once)
+
+The signed release has a different cryptographic extension ID from a path-derived
+unpacked installation, so their browser storage is separate. Keep the old copy
+until any pending data is transferred. `ui/transfer.html` can export/import queued
+text, captured attachment bytes and draft backups to a local `.cqbackup` file.
+
+In the old copy, export first. Disable it, install the signed release, and open
+**All queues → Export/import queue** to import. Imports are paused for review and
+never overwrite an existing queue. Reload ChatGPT once during this initial move
+so the old extension's listeners are no longer running. Later signed-to-signed
+updates reattach their own scripts without navigating the chat.
+
+The browser-only transfer screen is compatible with v0.5.1. Its three files are
+`ui/transfer.html`, `ui/transfer.js` and `core/backup.mjs`, alongside the existing
+v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
+Transfer files contain private data: never upload them to this repository.
+The transfer screen currently caps total attachment data at 256 MiB.
+
+## v0.6.0
+
+* Native signed-package update URL and reproducible CRX3 packaging.
+* Apply downloaded updates at safe boundaries, not during an active send/capture.
+* Reattach existing pages, clean up old listeners, preserve draft text and prevent
+  duplicate Tab handlers after subsequent updates.
+* Immediate page injection and expiring commands: a timed-out browser request
+  must not send a message unexpectedly when it finally gets scheduled.
+* Clear stale reconnection notices after recovery; compact status in the composer,
+  stable queue scroll position and neutral styling in the global manager.
+* Keep the original safety behavior for unconfirmed sends; never retry blindly.
+
+## Remaining limits
+
+The site DOM is not a public API. Background conversations still rely on an
+internal same-origin iframe when they are not open elsewhere. ChatGPT or the
+browser can refuse or suspend that frame. This release does **not** claim that
+all background sending failures or every native ChatGPT mode are solved.
+It never opens/navigates a browser tab as a fallback for automatic queue sending.
+Frozen pages cannot execute while frozen; closed browsers cannot send.
+
+Local files are captured from native selection, paste and drag-and-drop. Native
+Library/connector references, selected text context and newly introduced modes
+are not universally transportable. Unsupported context is not silently omitted.
+The normal Enter path remains available; file submission may briefly reserve the
+composer to avoid mixing queued files with a manually written message.
+
+## Development / release
+
+Node 22+, Python 3 and OpenSSL are used for tests and release packaging only.
+
+```sh
+npm install --ignore-scripts
+npm test
+npm run check
+python3 scripts/package_release.py --source . --key /secure/path/release.pem --out dist
+python3 scripts/package_release.py --verify dist/chatgpt-queue.crx
+```
+
+Publish a **draft** GitHub release matching `v<manifest.version>`, attach the CRX,
+ZIP, `updates.xml`, `release.json` and `SHA256SUMS`, then publish it as latest only
+after all assets are present. Never regenerate the signing key for a new version.
+The private key stays outside the repository and release assets. A signing tool
+is run by the maintainer at release time; it is not part of the installed extension.
+
+Tests separate queue logic/API simulations, real Chromium DOM fixtures (mocked
+location and RPC), CRX3 signature verification and live-site behavior. This build
+has not been validated as a complete installed extension against a live ChatGPT
+account. See `docs/VERIFICATION.md` for the evidence and restrictions.
+
+[Chrome: self-hosted updates](https://developer.chrome.com/docs/extensions/how-to/distribute/host-on-linux)
+· [Update lifecycle](https://developer.chrome.com/docs/extensions/develop/concepts/extensions-update-lifecycle)
+
+Unofficial project, not affiliated with OpenAI. MIT license.

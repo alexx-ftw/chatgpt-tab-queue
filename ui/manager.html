@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ChatGPT Queue · Todas las colas</title><link rel="stylesheet" href="manager.css"></head>
+<body>
+<header><div class="brand"><img src="../icons/128.png" width="42" height="42" alt=""><div><h1>ChatGPT Queue</h1><p>Tu siguiente mensaje, a su tiempo.</p></div></div><span class="local" id="version">v0.6.0</span></header>
+<main>
+<section class="toolbar"><div><h2>Todas las colas</h2><p id="summary" role="status">Cargando…</p></div><div class="controls"><button id="diagnostics">Copiar diagnóstico</button><button id="pause">Pausar todo</button><button id="clear" class="danger">Vaciar toda la cola</button></div></section>
+<p id="notice" class="notice" role="alert" hidden></p>
+<textarea id="diagnostic-output" class="editor" aria-label="Diagnóstico de la cola" readonly hidden></textarea>
+<section id="draft-backups" aria-label="Copias de borradores" hidden></section>
+<section id="queues" aria-label="Mensajes pendientes"></section>
+<section class="settings"><div class="controls"><button id="check-update">Buscar actualización</button><a href="transfer.html">Exportar / importar cola</a></div><p id="update-status"></p></section>
+<section class="settings"><label><input id="preserve" type="checkbox" checked> Conservar el modelo y el esfuerzo seleccionados al encolar</label><p>Se respeta la configuración de tu cuadro visible. En los contextos internos, la extensión intenta reproducir el modelo y las herramientas guardados al encolar.</p></section>
+<details class="help"><summary>Uso, privacidad y segundo plano</summary>
+<p><strong>Tab</strong> encola el texto y los archivos del cuadro nativo. No abre, selecciona, navega ni cierra pestañas. La vista global y «Abrir chat» solo se abren mediante sus botones explícitos.</p>
+<p>Si la conversación no está visible, se intenta atender en un contexto interno independiente, sin abrir pestañas ni cambiar tu chat. Al volver, un contexto interno atascado no conserva la prioridad sobre el editor de esa conversación. La carga interna sigue sujeta a lo que permitan ChatGPT y el navegador.</p>
+<p>Los envíos de texto guardan y restauran tu borrador. Para subir archivos se reserva temporalmente el mismo cuadro; usa Pausar para cancelarlo y volver a editar. Un borrador con otros adjuntos o contexto nativo no se sustituye.</p>
+<p>Las copias de seguridad de borradores se guardan localmente antes de usar el cuadro. Se eliminan al confirmar su restauración. Si esta falla, aparecen arriba para copiarlas; Vaciar cola no elimina esas copias.</p>
+<p>Los pendientes y archivos se guardan localmente. No hay servidor propio ni pagos. Los formatos, límites, Biblioteca y referencias conectadas tienen las mismas limitaciones de captura que la versión anterior. No se promete compatibilidad universal con todos los modos de ChatGPT.</p>
+<p>Una pestaña congelada, el navegador cerrado o el ordenador suspendido pueden retrasar los envíos. Los resultados inciertos no se reintentan automáticamente.</p>
+<p>Versión 0.5.1 beta local. Proyecto no oficial, sin afiliación con OpenAI.</p>
+</details>
+</main><footer>ChatGPT Queue · Los enviados salen de pendientes al confirmarse. La respuesta en curso sigue por separado.</footer>
+<script src="../core/client.js"></script><script src="manager.js"></script>
+</body></html>
