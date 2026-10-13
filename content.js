@@ -4,14 +4,15 @@
  if(previous?.version===VERSION)return;previous?.dispose?.();
  let disposed=false,observer=null,interval=null;const listeners=[];
  function listen(target,type,fn,opts){target.addEventListener(type,fn,opts);listeners.push(()=>target.removeEventListener(type,fn,opts));}
- globalThis.__CQ2Content={version:VERSION,dispose(){disposed=true;for(const remove of listeners)remove();observer?.disconnect();clearInterval(interval);clearTimeout(refreshTimer);clearTimeout(heartbeatTimer);clearTimeout(toastTimer);host?.remove();toast?.remove();for(const task of uploads.values())task.cancelled=true;try{chrome.runtime.onMessage.removeListener(onRuntimeMessage);}catch{}},nativeFiles:previous?.nativeFiles||new Map()};
+ globalThis.__CQ2Content={version:VERSION,dispose(){disposed=true;for(const remove of listeners)remove();observer?.disconnect();clearInterval(interval);clearTimeout(refreshTimer);clearTimeout(heartbeatTimer);clearTimeout(toastTimer);jobList?.dispose();host?.remove();toast?.remove();for(const task of uploads.values())task.cancelled=true;try{chrome.runtime.onMessage.removeListener(onRuntimeMessage);}catch{}},nativeFiles:previous?.nativeFiles||new Map(),uiDrafts:previous?.uiDrafts||new Map()};
  const {rpc,storeFile,prettySize}=globalThis.CQClient;
  const FORM='form[data-chatgpt-composer],form[data-type="unified-composer"]';
  const EDITOR='[data-composer-markdown][contenteditable="true"],#prompt-textarea[contenteditable="true"],textarea#prompt-textarea,.ProseMirror[contenteditable="true"][role="textbox"]';
  const clean=s=>String(s??'').trim();
- let state=null,host,shadow,list,statusNode,pauseButton,clearButton;
+ let state=null,host,shadow,list,statusNode,pauseButton,clearButton,noticeNode,jobList,mountedCid;
  let saving=false,composing=false,capturedTab=false,refreshing=false,refreshAgain=false,signature='',refreshTimer;
  let draftSeed=crypto.randomUUID(),lastLocal=null,lastPath=location.pathname,heartbeatTimer,toast,toastTimer;
+ const uiDrafts=globalThis.__CQ2Content.uiDrafts;
  const nativeFiles=globalThis.__CQ2Content.nativeFiles,seenCards=new Map(),uploads=new Map();
  function inspect(){try{const s=CQPage({cmd:'inspect'});if(s&&typeof s==='object')return s;}catch{}
   return {ready:false,text:'',pathId:null,attachments:{count:0,items:[],unsupported:false,loading:false}};
@@ -30,6 +31,7 @@
  }
  const paths={pause:'M7 4v12M13 4v12',play:'m7 4 9 6-9 6z',trash:'M3 5h14M8 5V3h4v2M5 5l1 12h8l1-12M8 8v6M12 8v6',open:'M4 4h5M4 4v12h12v-5M11 3h6v6M17 3l-8 8',remove:'m5 5 10 10M5 15 15 5',edit:'m4 13 9-9 3 3-9 9-4 1z',retry:'M16 6a7 7 0 1 0 1 6M16 2v5h-5'};
  function setIcon(b,name){
+  if(b.dataset.icon===name)return;b.dataset.icon=name;
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 20 20');svg.setAttribute('width','16');svg.setAttribute('height','16');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.4');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');svg.setAttribute('aria-hidden','true');
   const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',paths[name]);svg.append(p);b.replaceChildren(svg);
  }
@@ -46,69 +48,55 @@
   finally{refreshing=false;if(refreshAgain){refreshAgain=false;scheduleRefresh();}}
  }
  function scheduleRefresh(){if(disposed||refreshTimer)return;refreshTimer=setTimeout(()=>{refreshTimer=null;refresh();},100);}
- function unmount(){host?.remove();host=null;shadow=null;signature='';}
- function mount(){
+ function unmount(){jobList?.dispose();jobList=null;host?.remove();host=null;shadow=null;mountedCid=null;signature='';}
+ function mount(cid){
   const anchor=globalThis.CQPage({cmd:'uiAnchor'}),form=anchor?.form;
   if(!form||!anchor.editor){unmount();return false;}
+  if(mountedCid&&mountedCid!==cid)unmount();
   if(!host){
+   const V=globalThis.CQView;mountedCid=cid;
    host=element('div');host.id='cq2-panel';host.style.cssText='display:block;min-width:0;width:100%;margin:0;position:relative;z-index:4';
    shadow=host.attachShadow({mode:'open'});
    const style=element('style');style.textContent=`
-    :host{font:12px/1.45 var(--font-sans,system-ui,sans-serif);color:var(--text-secondary,var(--color-text-secondary,var(--color-text,inherit)))}
+    :host{--q-font:var(--font-sans,system-ui,sans-serif);--q-fg:var(--text-primary,var(--color-text,CanvasText));--q-muted:var(--text-secondary,var(--color-text-secondary,var(--color-text,GrayText)));--q-bg:var(--main-surface-primary,var(--color-surface,Canvas));--q-soft:var(--main-surface-secondary,var(--color-bg-primary-ghost-hover,#8881));--q-hover:var(--main-surface-secondary,var(--color-bg-primary-ghost-hover,#8882));--q-line:var(--border-light,var(--color-border,#8883));--q-warning:var(--text-primary,var(--color-text,CanvasText));font:12px/1.45 var(--q-font);color:var(--q-muted)}
     *{box-sizing:border-box}[hidden]{display:none!important}
-    .panel{padding:2px 8px 5px;background:transparent}.bar{display:flex;align-items:center;gap:3px;min-height:25px}.status{flex:1;min-width:0;font-size:12px;font-weight:400;opacity:.8}
-    button{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:27px;height:27px;font:inherit;border:0;border-radius:8px;background:transparent;color:inherit;cursor:pointer;padding:5px}
-    button:hover{background:var(--main-surface-secondary,var(--color-bg-primary-ghost-hover,#8882))}button:focus-visible{outline:2px solid currentColor;outline-offset:2px}button:disabled{opacity:.4;cursor:default}
-    .list{max-height:min(32vh,300px);overflow:auto;scrollbar-width:thin}.job{display:flex;align-items:flex-start;gap:7px;border-top:1px solid var(--border-light,var(--color-border,#8883));padding:7px 0}
-    .number{width:14px;flex-shrink:0;text-align:center;font-variant-numeric:tabular-nums;opacity:.55;padding-top:2px}.body{flex:1;min-width:0}.text{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-primary,var(--color-text,inherit));font-size:13px}
-    .files{display:flex;gap:5px;flex-wrap:wrap;margin-top:3px}.file{font-size:11px;opacity:.75;overflow-wrap:anywhere}.phase,.notice{font-size:11px;opacity:.7;margin-top:3px}.actions{display:flex;gap:0}.editing{display:block}
-    textarea{width:100%;min-height:90px;resize:vertical;font:inherit;color:inherit;background:transparent;border:1px solid var(--color-border,#8885);border-radius:10px;padding:8px}.textbutton{width:auto;padding:4px 8px}
+    .panel{padding:0 8px 5px;background:transparent}.bar{display:flex;align-items:center;gap:2px;min-height:32px;padding:0 0 4px}.status{flex:1;min-width:0;font-size:12px;line-height:1.5;margin-right:6px}
+    .bar button{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:30px;height:30px;color:inherit;background:transparent;border:0;border-radius:9px;padding:6px;cursor:pointer}
+    .bar button:hover{background:var(--q-hover);color:var(--q-fg)}.bar button:focus-visible{outline:2px solid var(--q-fg);outline-offset:2px}.bar button:disabled{opacity:.4;cursor:default}
+    .list{max-height:min(35vh,340px);overflow:auto;scrollbar-width:thin;scrollbar-color:var(--q-line) transparent;overscroll-behavior:contain}.queue-notice{font-size:11px;color:var(--q-muted);padding:5px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+    .panel .cq-job{padding:9px 0}.panel .cq-text{font-size:13px;line-height:1.55}
+    @media(hover:none),(pointer:coarse){.bar button{width:36px;height:36px}}
+    @media(max-width:440px){.panel{padding-inline:4px}.bar{gap:0}.status{font-size:11px}.list{max-height:36vh}.panel .cq-job{padding:8px 0}}
    `;
    const panel=element('section',undefined,'panel');panel.setAttribute('aria-label','Mensajes en cola');
-   const bar=element('div',undefined,'bar');statusNode=element('span','','status');statusNode.setAttribute('role','status');
-   pauseButton=iconButton('Pausar esta cola',async()=>{const id=state.aliases[target().id]||target().id;await rpc(state.paused?'RESUME':state.conversations[id]?.paused?'RESUME':'PAUSE',{conversationId:state.paused?null:id});await refresh();},'pause');
+   const bar=element('div',undefined,'bar');statusNode=element('span','','status');statusNode.setAttribute('role','status');statusNode.setAttribute('aria-live','polite');statusNode.setAttribute('aria-atomic','true');
+   pauseButton=iconButton('Pausar esta cola',async()=>{const current=state.aliases[target().id]||target().id;await rpc(state.paused?'RESUME':state.conversations[current]?.paused?'RESUME':'PAUSE',{conversationId:state.paused?null:current});await refresh();},'pause');
    clearButton=iconButton('Vaciar toda la cola',async()=>{
     const n=state?.jobs.length||0;if(!n)return;
-    if(confirm(`¿Vaciar toda la cola? Se eliminarán ${n} pendientes de todas las conversaciones y sus archivos locales. No se detiene la respuesta en curso.`)){await rpc('CLEAR_ALL');await refresh();}
+    if(confirm(`¿Vaciar toda la cola? Se eliminarán ${n} pendientes de todas las conversaciones y sus archivos locales. No se detiene la respuesta en curso.`)){await rpc('CLEAR_ALL');for(const d of uiDrafts.values())d.clear();jobList?.discardEdits();await refresh();}
    },'trash');
    const all=iconButton('Todas las colas',()=>rpc('OPEN_MANAGER'),'open');
-   bar.append(statusNode,pauseButton,clearButton,all);list=element('div',undefined,'list');panel.append(bar,list);shadow.append(style,panel);
+   bar.append(statusNode,pauseButton,clearButton,all);list=element('div',undefined,'list');noticeNode=element('div','','queue-notice');noticeNode.hidden=true;panel.append(bar,list,noticeNode);shadow.append(style,V.style(),panel);
+   if(!uiDrafts.has(cid))uiDrafts.set(cid,new Map());
+   jobList=V.createJobList(list,{rpc,notify,refresh,compact:true,drafts:uiDrafts.get(cid),isAlive:()=>!disposed});
   }
   if(host.parentNode!==form.parentNode||host.nextSibling!==form)form.before(host);
   return true;
  }
  function render(){
   if(disposed||!state)return;
-  const key=target().id,cid=state.aliases[key]||key,c=state.conversations[cid],jobs=state.jobs.filter(j=>j.conversationId===cid);
-  // No helper banner, no idle toolbar, no UI in chats which have no pending messages.
-  if(state.isHelper||!jobs.length){unmount();return;}
-  if(!document.body||!mount())return;
-  statusNode.textContent=`${jobs.length} en cola${state.paused||c?.paused?' · En pausa':''}`;
-  const paused=state.paused||c?.paused;pauseButton.title=paused?'Reanudar esta cola':'Pausar esta cola';pauseButton.setAttribute('aria-label',pauseButton.title);setIcon(pauseButton,paused?'play':'pause');
-  clearButton.disabled=saving;
-  const sig=JSON.stringify([cid,state.revision]);if(sig===signature)return;signature=sig;
-  if(shadow.querySelector('[data-editing]'))return;
-  const oldScroll=list.scrollTop;list.replaceChildren();
-  for(const [i,j] of jobs.entries()){
-   const row=element('article',undefined,'job'),body=element('div',undefined,'body');row.append(element('span',String(i+1),'number'),body);
-   body.append(element('div',j.text||'(Solo adjuntos)','text'));
-   if(j.files.length){const files=element('div',undefined,'files');for(const f of j.files)files.append(element('span',`${f.name} · ${prettySize(f.size)}`,'file'));body.append(files);}
-   const phase={held:'Guardado, revisar borrador',preparing:'Preparando',submitting:'Confirmando envío',uncertain:'Envío incierto',error:'Revisar'}[j.status];
-   if(j.reason||phase)body.append(element('div',j.reason||phase,'phase'));
-   const actions=element('div',undefined,'actions');
-   if(['queued','held','error'].includes(j.status))actions.append(iconButton('Editar pendiente',()=>editRow(j,row),'edit'));
-   if(['error','held'].includes(j.status))actions.append(iconButton('Reintentar pendiente',async()=>{if(j.status==='held'&&!confirm('Comprueba que este mensaje no se haya enviado manualmente ni siga en el borrador. ¿Reactivar?'))return;await rpc('RETRY',{id:j.id});await refresh();},'retry'));
-   actions.append(iconButton('Retirar pendiente',async()=>{if(['submitting','uncertain'].includes(j.status)&&!confirm('Este mensaje puede haberse enviado ya. ¿Retirarlo solo de la cola?'))return;await rpc('REMOVE',{id:j.id});await refresh();},'remove'));
-   row.append(actions);list.append(row);
-  }
-  list.scrollTop=oldScroll;
-  if(c?.reason){const transient=c.reason.startsWith('Esperando al navegador:');const n=element('div',transient?'Reconectando…':c.reason,'notice');n.title=c.reason;list.append(n);}
- }
- async function editRow(j,row){
-  await rpc('PAUSE',{conversationId:j.conversationId});const full=await rpc('GET_JOB',{id:j.id});row.dataset.editing='true';row.classList.add('editing');row.replaceChildren();
-  const textarea=element('textarea');textarea.value=full.text;textarea.setAttribute('aria-label','Editar mensaje pendiente');
-  const save=button('Guardar',async()=>{await rpc('EDIT',{id:j.id,text:textarea.value});delete row.dataset.editing;signature='';await refresh();});save.className='textbutton';
-  const cancel=button('Cancelar',()=>{delete row.dataset.editing;signature='';render();});cancel.className='textbutton';row.append(textarea,save,cancel);textarea.focus();
+  const snap=inspect(),key=target(snap).id,cid=state.aliases[key]||key,c=state.conversations[cid],jobs=state.jobs.filter(j=>j.conversationId===cid);
+  // Only pending queues are shown. Keep an actively edited, concurrently removed
+  // item available for copying rather than silently destroying unsaved user text.
+  const hasEdit=uiDrafts.get(cid)?.size>0;
+  if(state.isHelper||(!jobs.length&&!hasEdit)){unmount();return;}
+  if(!document.body||!mount(cid))return;
+  const V=globalThis.CQView,paused=state.paused||c?.paused;
+  V.text(statusNode,jobs.length?`${jobs.length} en cola · ${V.queueStatus(c,jobs,{paused:state.paused,busy:snap.state==='busy'})}`:'Edición sin guardar');
+  pauseButton.title=state.paused?'Reanudar todas las colas':paused?'Reanudar esta cola':'Pausar esta cola';pauseButton.setAttribute('aria-label',pauseButton.title);setIcon(pauseButton,paused?'play':'pause');
+  clearButton.disabled=saving||!state.jobs.length;
+  jobList.update(jobs,{paused});
+  const reason=String(c?.reason||'');V.text(noticeNode,reason.startsWith('Esperando al navegador:')?'Reconectando con el chat. Los mensajes siguen guardados.':reason);noticeNode.title=reason;noticeNode.hidden=!reason;
  }
  async function enqueue(){
   if(saving||state?.isHelper||document.querySelector('form[data-cq-reservation]'))return;saving=true;

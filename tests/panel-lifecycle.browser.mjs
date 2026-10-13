@@ -25,7 +25,7 @@ async function setup(n=2){
  const iso=async expression=>{const r=await cdp.send('Runtime.evaluate',{expression,contextId:executionContextId,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result.value;};
  await iso(`globalThis.__backend=${JSON.stringify(state(n))};globalThis.__listeners=[];globalThis.__rpcCalls=[];globalThis.__version='0.6.1';globalThis.__held=[];globalThis.__defer=false;
  globalThis.chrome={runtime:{id:'fixture',getManifest:()=>({version:__version}),onMessage:{addListener(fn){__listeners.push(fn)},removeListener(fn){__listeners=__listeners.filter(x=>x!==fn)}},async sendMessage(m){__rpcCalls.push(m.type);if(m.type==='GET_STATE'){if(__defer){__defer=false;return new Promise(resolve=>__held.push(resolve))}return {ok:true,value:structuredClone(__backend)}}if(m.type==='PAUSE'){__backend.conversations[m.conversationId].paused=true;__backend.revision++}if(m.type==='RESUME'){__backend.conversations[m.conversationId].paused=false;__backend.revision++}return {ok:true,value:true}}}};`);
- for(const file of ['core/adapter.js','core/client.js','core/file-matching.js','content.js'])await iso(readFileSync(new URL(file,root),'utf8'));
+ for(const file of ['core/adapter.js','core/client.js','core/file-matching.js','ui/view.js','content.js'])await iso(readFileSync(new URL(file,root),'utf8'));
  await page.waitForTimeout(220);
  assert.equal(await page.title(),'Queue panel regression');assert.equal(page.url(),'https://chatgpt.com/c/'+A);assert.equal(await page.evaluate('typeof window.CQPage'),'undefined');
  return {page,iso,close:()=>context.close()};

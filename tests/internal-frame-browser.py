@@ -60,7 +60,7 @@ async def main():
   await call({'cmd':'localBegin','frameToken':token,'conversationId':A,'token':'file-lease','text':'con documento','expectedFiles':[file],'beforeUser':'u1'})
   await call({'cmd':'write','frameToken':token,'conversationId':A,'expectText':'','snapshot':{'text':'con documento'}})
   await page.evaluate('''()=>{window.testListeners=[];window.uploadResults=[];window.chrome={runtime:{id:'test',onMessage:{addListener(f){testListeners.push(f)}},async sendMessage(m){if(m.type==='FILE_READ')return {ok:true,value:m.index===0?'AQIDBAUGBw==':null};if(m.type==='UPLOAD_RESULT'){uploadResults.push(m);return {ok:true,value:true};}if(m.type==='GET_STATE')return {ok:true,value:{jobs:[],conversations:{},aliases:{},helpers:{},revision:0}};return {ok:true,value:true};}}};}''')
-  for name in ['core/client.js','core/file-matching.js','content.js']:
+  for name in ['core/client.js','core/file-matching.js','ui/view.js','content.js']:
    await page.add_script_tag(content=(EXT/name).read_text().replace('https://chatgpt.com',ORIGIN))
   await page.evaluate('''m=>{for(const fn of testListeners)fn(m,{id:'test'},()=>{});}''',{'channel':'cq2','type':'UPLOAD','jobId':'job1','token':'file-lease','conversationId':A,'frameToken':token,'files':[file]})
   await page.wait_for_function('uploadResults.length>0')

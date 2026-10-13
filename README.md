@@ -42,6 +42,30 @@ v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
 Transfer files contain private data: never upload them to this repository.
 The transfer screen currently caps total attachment data at 256 MiB.
 
+## v0.6.3: UI más nativa y estable
+
+- Panel compacto con estado claro y todos los mensajes desplegados.
+- Acciones de copiar, editar y retirar al pasar el cursor o enfocar; visibles en pantallas táctiles/estrechas y en mensajes que requieren revisión.
+- Edición con Ctrl+Enter / Cmd+Enter para guardar y Esc para cancelar. Editar pausa esa conversación; guardar no la reanuda automáticamente.
+- Las filas no se reconstruyen en cada refresco: se conservan el foco, la selección y el texto en edición mientras se actualizan otras filas.
+- Buscador por conversación, mensaje o archivo y filtros por botones: Todas / En pausa / Revisar. Los filtros no alteran la cola.
+- Adjuntos en etiquetas con icono, nombre y tamaño. Sin adjuntador adicional.
+- Ajustes, actualizaciones, diagnóstico e importación en una zona secundaria.
+- Vaciado global con confirmación, sin detener respuestas ni borrar el historial.
+- Una edición eliminada desde otra vista se conserva para copiarla; nunca se vuelve a encolar por sí sola.
+
+Actualización de interfaz únicamente. Mismos permisos, firma, canal de actualización, motor de envío y almacenamiento. Se distribuye como actualización firmada normal: no hace falta reinstalar ni importar la cola.
+
+**Validación:** 162 pruebas Node y 40 comprobaciones Chromium aisladas (23 UI/UX, 5 de seguridad de edición y controles accesibles, 12 regresiones del panel). Temas claro y oscuro, escritorio, anchuras de 390/320 px, entrada táctil y movimiento reducido. Las páginas de prueba usan RPC simulado, no una sesión real de ChatGPT. Las limitaciones existentes del envío en segundo plano permanecen.
+
+Pruebas de interfaz (Playwright y Chromium ya instalados):
+
+```sh
+CQ_PLAYWRIGHT=/ruta/a/playwright/index.mjs node tests/ui-ux.browser.mjs
+CQ_PLAYWRIGHT=/ruta/a/playwright/index.mjs node tests/view-safety.browser.mjs
+CQ_PLAYWRIGHT=/ruta/a/playwright/index.mjs node tests/panel-lifecycle.browser.mjs
+```
+
 ## v0.6.2: queue panel recovery
 
 Fixes a reproducible mismatch where the sender recognized the active composer but the

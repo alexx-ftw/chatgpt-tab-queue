@@ -1,24 +1,24 @@
 <!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ChatGPT Queue · Todas las colas</title><link rel="stylesheet" href="manager.css"></head>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ChatGPT Queue · Todas las colas</title><link rel="stylesheet" href="manager.css"></head>
 <body>
-<header><div class="brand"><img src="../icons/128.png" width="42" height="42" alt=""><div><h1>ChatGPT Queue</h1><p>Tu siguiente mensaje, a su tiempo.</p></div></div><span class="local" id="version">v0.6.2</span></header>
+<header class="app-header"><div class="brand"><img src="../icons/32.png" width="24" height="24" alt=""><span>ChatGPT Queue</span><span class="version" id="version">v0.6.3</span></div><button id="tools-toggle" class="quiet" aria-label="Ajustes y herramientas" aria-expanded="false" aria-controls="tools">Ajustes y herramientas</button></header>
 <main>
-<section class="toolbar"><div><h2>Todas las colas</h2><p id="summary" role="status">Cargando…</p></div><div class="controls"><button id="diagnostics">Copiar diagnóstico</button><button id="pause">Pausar todo</button><button id="clear" class="danger">Vaciar toda la cola</button></div></section>
-<p id="notice" class="notice" role="alert" hidden></p>
+<section class="toolbar"><div><h1>Todas las colas</h1><p id="summary" role="status" aria-live="polite">Cargando mensajes…</p></div><div class="controls global-controls"><button id="pause">Pausar todo</button><button id="clear" class="quiet danger">Vaciar toda la cola</button></div></section>
+<section id="tools" class="tools" aria-label="Ajustes y herramientas" hidden>
+<div class="tool-heading"><h2>Ajustes y herramientas</h2><button id="tools-close" class="quiet" aria-label="Cerrar ajustes">Cerrar</button></div>
+<div class="tool-row"><div><h3>Actualizaciones</h3><p id="update-status" role="status">El navegador gestiona las actualizaciones.</p></div><button id="check-update">Buscar actualización</button></div>
+<div class="tool-row"><div><h3>Datos y diagnóstico</h3><p>Los pendientes y adjuntos se guardan en este navegador.</p></div><div class="controls"><button id="diagnostics">Copiar diagnóstico</button><a class="button-link" href="transfer.html">Exportar / importar cola</a></div></div>
+<div class="tool-row"><label class="setting"><input id="preserve" type="checkbox" checked><span>Conservar modelo y esfuerzo<small>Se respeta tu cuadro visible. La configuración guardada se reproduce en los contextos internos.</small></span></label></div>
+<button id="help-toggle" class="quiet" aria-expanded="false" aria-controls="help-content">Uso y límites</button>
+<div id="help-content" class="help" hidden><p><kbd>Tab</kbd> guarda el texto y los archivos capturables del cuadro nativo. <kbd>Enter</kbd> conserva el envío normal. La extensión no abre pestañas ni cambia tu conversación para enviar.</p><p>Los envíos entre conversaciones siguen sujetos a que ChatGPT permita los contextos internos. La congelación de una pestaña, el cierre del navegador o la suspensión del equipo pueden retrasarlos. Biblioteca, referencias conectadas y modos especiales no tienen compatibilidad universal.</p><p>Editar pausa esa conversación. Guardar o cancelar no la reanuda automáticamente. Los envíos inciertos requieren comprobar el historial; nunca se reintentan a ciegas. Vaciar elimina pendientes y sus copias locales de archivos, no respuestas ni el historial de ChatGPT.</p><p>Proyecto no oficial, sin afiliación con OpenAI. No hay servidor propio, telemetría ni pagos de la extensión.</p></div>
+</section>
+<div class="search-toolbar"><div class="search-field"><span id="search-icon" aria-hidden="true"></span><input id="search" type="search" aria-label="Buscar en las colas" placeholder="Buscar conversación, mensaje o archivo" autocomplete="off"><button id="search-clear" class="quiet" aria-label="Borrar búsqueda" hidden>×</button></div><div class="filters" role="group" aria-label="Filtrar mensajes"><button data-filter="all" aria-pressed="true">Todas <span id="count-all">0</span></button><button data-filter="paused" aria-pressed="false">En pausa <span id="count-paused">0</span></button><button data-filter="review" aria-pressed="false">Revisar <span id="count-review">0</span></button></div></div>
+<div id="notice-wrap" class="notice-wrap" hidden><p id="notice" role="status" aria-live="polite"></p><button id="notice-close" class="quiet" aria-label="Cerrar aviso">×</button></div>
 <textarea id="diagnostic-output" class="editor" aria-label="Diagnóstico de la cola" readonly hidden></textarea>
 <section id="draft-backups" aria-label="Copias de borradores" hidden></section>
 <section id="queues" aria-label="Mensajes pendientes"></section>
-<section class="settings"><div class="controls"><button id="check-update">Buscar actualización</button><a href="transfer.html">Exportar / importar cola</a></div><p id="update-status"></p></section>
-<section class="settings"><label><input id="preserve" type="checkbox" checked> Conservar el modelo y el esfuerzo seleccionados al encolar</label><p>Se respeta la configuración de tu cuadro visible. En los contextos internos, la extensión intenta reproducir el modelo y las herramientas guardados al encolar.</p></section>
-<details class="help"><summary>Uso, privacidad y segundo plano</summary>
-<p><strong>Tab</strong> encola el texto y los archivos del cuadro nativo. No abre, selecciona, navega ni cierra pestañas. La vista global y «Abrir chat» solo se abren mediante sus botones explícitos.</p>
-<p>Si la conversación no está visible, se intenta atender en un contexto interno independiente, sin abrir pestañas ni cambiar tu chat. Al volver, un contexto interno atascado no conserva la prioridad sobre el editor de esa conversación. La carga interna sigue sujeta a lo que permitan ChatGPT y el navegador.</p>
-<p>Los envíos de texto guardan y restauran tu borrador. Para subir archivos se reserva temporalmente el mismo cuadro; usa Pausar para cancelarlo y volver a editar. Un borrador con otros adjuntos o contexto nativo no se sustituye.</p>
-<p>Las copias de seguridad de borradores se guardan localmente antes de usar el cuadro. Se eliminan al confirmar su restauración. Si esta falla, aparecen arriba para copiarlas; Vaciar cola no elimina esas copias.</p>
-<p>Los pendientes y archivos se guardan localmente. No hay servidor propio ni pagos. Los formatos, límites, Biblioteca y referencias conectadas tienen las mismas limitaciones de captura que la versión anterior. No se promete compatibilidad universal con todos los modos de ChatGPT.</p>
-<p>Una pestaña congelada, el navegador cerrado o el ordenador suspendido pueden retrasar los envíos. Los resultados inciertos no se reintentan automáticamente.</p>
-<p>Versión 0.5.1 beta local. Proyecto no oficial, sin afiliación con OpenAI.</p>
-</details>
-</main><footer>ChatGPT Queue · Los enviados salen de pendientes al confirmarse. La respuesta en curso sigue por separado.</footer>
-<script src="../core/client.js"></script><script src="manager.js"></script>
+</main>
+<footer class="app-footer"><span><kbd>Tab</kbd> para encolar · <kbd>Enter</kbd> para enviar normalmente</span><span>Los enviados salen de la cola al confirmarse.</span></footer>
+<script src="../core/client.js"></script><script src="view.js"></script><script src="manager.js"></script>
 </body></html>

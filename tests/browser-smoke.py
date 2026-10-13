@@ -63,7 +63,7 @@ async def main():
   page=await context.new_page();page.on('pageerror',lambda e:errors.append(str(e)));page.on('dialog',lambda d:d.accept())
   await page.set_content(HTML)
   await page.evaluate('if(!crypto.randomUUID)crypto.randomUUID=()=>"test-"+Math.random().toString(36).slice(2)');await page.add_script_tag(content=MOCK)
-  for path in ['core/adapter.js','core/client.js','core/file-matching.js','content.js']:
+  for path in ['core/adapter.js','core/client.js','core/file-matching.js','ui/view.js','content.js']:
    source=(EXT/path).read_text()
    if path=='core/adapter.js':source=source.replace('location = pageWorld.location;', 'location = new URL(\"https://chatgpt.com/c/'+A+'\");')
    code='(function(location){'+source+'\n})({origin:"https://chatgpt.com",pathname:"/c/'+A+'"});'
