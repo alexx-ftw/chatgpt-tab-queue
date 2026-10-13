@@ -59,13 +59,84 @@ globalThis.CQPage = function CQPage(args) {
     }
     return null;
   }
+  // A favicon or a literal web-link node is not a file/reference. Keep this
+  // recognition local to the composer and fail closed on opaque native context.
+  const INLINE_CONTEXT='[contenteditable="false"],[data-mention],[data-type="mention"]';
+  let inlineContextCache=null;
+  function webURL(value){
+    const raw=clean(value);
+    if(!/^https?:\/\/[^\s<>"`]+$/i.test(raw)||/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/.test(raw))return null;
+    try{const u=new rootWorld.URL(raw);return u.hostname&&!u.username&&!u.password?{raw,href:u.href}:null;}catch{return null;}
+  }
+  function opaqueReference(node){
+    if(node?.nodeType!==1)return false;
+    const kind=String(node.getAttribute('data-type')||'');
+    if(node.hasAttribute('data-mention')||/(?:^|[-_])(mention|reference|attachment|context|resource|file)(?:$|[-_])/i.test(kind))return true;
+    return Array.from(node.attributes).some(a=>/^data-(?:file|document|attachment|context|reference|resource|repository|source|item|asset|connector|app)-(?:id|key|token)$/i.test(a.name)||a.name==='data-id');
+  }
+  function literalLink(node){
+    if(!node||node.nodeType!==1)return null;
+    const elements=[node,...node.querySelectorAll('*')];
+    if(elements.some(opaqueReference))return null;
+    if(elements.some(n=>/^(INPUT|TEXTAREA|BUTTON|VIDEO|AUDIO|IFRAME|CANVAS|OBJECT|EMBED)$/i.test(n.tagName)||n.hasAttribute('download')||n.hasAttribute('data-composer-attachments')))return null;
+    // Never mistake a pasted photo/preview for a decorative favicon. A small,
+    // explicitly decorative image is allowed only as part of a full URL label.
+    for(const image of elements.filter(n=>String(n.tagName).toUpperCase()==='IMG')){
+      const w=Number(image.getAttribute('width')),h=Number(image.getAttribute('height'));
+      if(image.getAttribute('aria-hidden')!=='true'||!(w>0&&w<=32&&h>0&&h<=32))return null;
+    }
+    let invalid=false;
+    function labelText(n){
+      if(n.nodeType===3)return n.nodeValue;
+      if(n.nodeType!==1)return '';
+      if(/^(SVG|IMG)$/i.test(n.tagName))return '';
+      if(n.hasAttribute('hidden')||n.getAttribute('aria-hidden')==='true'||n.hasAttribute('inert')){
+        if(clean([...n.childNodes].map(labelText).join('')))invalid=true;
+        return '';
+      }
+      if(String(n.tagName).toUpperCase()==='BR')return '\n';
+      return [...n.childNodes].map(labelText).join('');
+    }
+    const value=webURL(labelText(node));if(invalid||!value)return null;
+    // URL display and destination must agree. Do not turn an opaque resource or
+    // a misleading label into a different message merely because it has an href.
+    for(const e of elements)for(const name of ['href','data-url','data-href']){
+      if(name==='href'&&String(e.tagName).toUpperCase()!=='A')continue;
+      if(!e.hasAttribute(name))continue;
+      if(webURL(e.getAttribute(name))?.href!==value.href)return null;
+    }
+    return value.raw;
+  }
+  function inlineContexts(){
+    if(inlineContextCache)return inlineContextCache;
+    const links=new Map();let unsupported=false;
+    const nodes=editor?[...editor.querySelectorAll(INLINE_CONTEXT)]:[];
+    for(const node of nodes){
+      if([...links.keys()].some(root=>root.contains(node)))continue;
+      let opaque=false;
+      for(let p=node;p&&p!==editor;p=p.parentElement)if(opaqueReference(p)){opaque=true;break;}
+      if(opaque){unsupported=true;continue;}
+      let found=false;
+      // Only a self-contained full-URL wrapper can explain a noneditable node.
+      // Stop at the editor, so surrounding user prose never becomes link data.
+      for(let p=node;p&&p!==editor;p=p.parentElement){
+        const url=literalLink(p);if(url){links.set(p,url);found=true;break;}
+      }
+      if(!found)unsupported=true;
+    }
+    return inlineContextCache={links,unsupported};
+  }
   function textOf(e){
     if(!e)return '';
     if(e.tagName==='TEXTAREA')return e.value;
-    if(e===editor){const v=pmView();if(v)return v.state.doc.textBetween(0,v.state.doc.content.size,'\n','\n');}
+    const links=e===editor?inlineContexts().links:new Map();
+    // ProseMirror textBetween can omit atomic link labels. Read certified URL
+    // nodes from the DOM, retaining the native document separately in capture().
+    if(e===editor&&!links.size){const v=pmView();if(v)return v.state.doc.textBetween(0,v.state.doc.content.size,'\n','\n');}
     function walk(n){
       if(n.nodeType===3)return n.nodeValue;
       if(n.nodeType!==1)return '';
+      if(links.has(n))return links.get(n);
       if(n.matches('br.ProseMirror-trailingBreak'))return '';
       if(n.tagName==='BR')return '\n';
       const a=[...n.childNodes],blocks=/^(P|DIV|H[1-6]|LI|PRE|BLOCKQUOTE|UL|OL|TR)$/;
@@ -95,7 +166,7 @@ globalThis.CQPage = function CQPage(args) {
       return {label:words(bits.join(' ')),image:!!node?.querySelector('img'),name:node?.querySelector('[data-file-name]')?.getAttribute('data-file-name')||null};
     });
     const count=remove.length||active.reduce((n,a)=>n+[...a.children].filter(visible).length,0);
-    const unsupported=!!editor?.querySelector('[contenteditable="false"],[data-mention],[data-type="mention"]')||!!(portal&&[...portal.children].some(visible))||(count>0&&remove.length!==count);
+    const unsupported=inlineContexts().unsupported||!!(portal&&[...portal.children].some(visible))||(count>0&&remove.length!==count);
     const loading=active.some(a=>[...a.querySelectorAll('[role="progressbar"],[aria-busy="true"],[data-state="uploading"],[class*="animate-spin"]')].some(visible));
     return {count,items,unsupported,loading,remove};
   }
@@ -201,6 +272,7 @@ globalThis.CQPage = function CQPage(args) {
         }
       }
     }
+    inlineContextCache=null; // Recheck node views after the edit.
     if(clean(textOf(editor))!==clean(snapshot.text))throw Error('El editor no aceptó el texto completo.');
     return true;
   }

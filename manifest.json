@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Queue · Tab",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "Tab encola texto y adjuntos. Colas independientes con contextos internos, sin abrir pestañas ni cambiar el chat visible.",
   "minimum_chrome_version": "120",
   "permissions": [
@@ -51,7 +51,7 @@
     "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'"
   },
   "incognito": "not_allowed",
-  "version_name": "0.6.3 · Native queue UI",
+  "version_name": "0.6.4 · Enlaces nativos en la cola",
   "update_url": "https://github.com/alexx-ftw/chatgpt-tab-queue/releases/latest/download/updates.xml",
   "homepage_url": "https://github.com/alexx-ftw/chatgpt-tab-queue",
   "key": "MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAsABI5skpQk4N6rZKir2W7jLhJZzPF9faCkXpKo13HiNlmsY+zu7nOu6YFBaO8xUXrs0fVgjLHnDLsfjlPeQ+IFsEUwub2EQo8Eq0x8HN7aZ7JksXxRZAqWfbCCjXkCjBOxJ7XPSr6hzUhO1YAw1ll/ebdeb17EVhubo/hch4TsEzfWBKRSPXfle3UwRkd9RFMhnNOf7BIiG9Fa0KA6JFUeoKMRFitmDnZnZXl7a0VGNaYIZGF9mwWBsxLOB9u9QVG3L96OGERpjTC+h+Q4Gxw3hG+oBv+tsFjl1Fj9Ty0CKXnP8asMd3+8x5lGwJdg/XVKVZY0JAxvUpdYGSZfC6pe1ptlzrPRHesGsAa7Q7npUydQInWc7wRxJ2bJUTwV6Cw5JL4JW2k31JrNK1VzmK9fi2a+cKytOOdZiJoVVQQKFM92H5qW+bAk6AVd2nbG/Foq6XgxpcZH6bNA4P4/oyALPHVtFT+wVkmEPfNflborlsA2Ra85KY6pnL24QMgwRBAgMBAAE="

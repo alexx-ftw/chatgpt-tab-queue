@@ -42,6 +42,27 @@ v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
 Transfer files contain private data: never upload them to this repository.
 The transfer screen currently caps total attachment data at 256 MiB.
 
+## v0.6.4: decorated web links are not attachments
+
+Fixes a false rejection of literal HTTP(S) links decorated with noneditable
+favicons or rendered as inline URL nodes. Capturing and final Send verification
+now distinguish a self-contained URL from opaque file/connector references.
+The visible URL remains exact, including query parameters and fragments; the
+native editor document is retained when available. Link node views are read
+again after editor transactions, so atomic-link text cannot disappear during
+verification. Mixed messages keep their original text, link order and files.
+
+The guard still rejects unknown references, resource identifiers, conflicting
+link labels/destinations, unrelated images and selected context above the editor.
+Its warning no longer incorrectly refers to opening another browser tab.
+No tabs, permissions, queue storage, signing identity or update channel changed.
+
+Verification uses unit tests and an isolated Chromium fixture with mocked
+extension messaging. The link tests exercise Tab, native Enter, one Send after
+response completion, draft restoration and exact native PDF bytes. This is not
+validation of the current live ChatGPT DOM; existing background-transport limits
+remain. No personal profile or real chat was used for these tests.
+
 ## v0.6.3: UI más nativa y estable
 
 - Panel compacto con estado claro y todos los mensajes desplegados.

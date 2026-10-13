@@ -2,7 +2,7 @@
 'use strict';
 /** Match captured File objects to native composer cards; ambiguous references are never discarded. */
 function selectCapturedFiles(attachments,captured){
- if(attachments.unsupported)throw Error('Este contexto nativo no se puede transportar a otra pestaña con seguridad. El borrador sigue intacto y puedes enviarlo normalmente con Enter.');
+ if(attachments.unsupported)throw Error('Este adjunto o referencia nativa todavía no se puede conservar con seguridad en la cola. El borrador sigue intacto y puedes enviarlo normalmente con Enter.');
  if(!attachments.count)return [];
  const rest=[...captured],selected=[];
  const cards=attachments.items||[];
