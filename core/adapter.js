@@ -35,8 +35,12 @@ globalThis.CQPage = function CQPage(args) {
   const visible=e=>(!selectedFrame||(selectedFrame.isConnected&&pageWorld.document===document))&&!!e?.isConnected&&!e.closest('[hidden],[aria-hidden="true"],[inert]')&&getComputedStyle(e).display!=='none'&&getComputedStyle(e).visibility!=='hidden'&&!!e.getClientRects().length;
   const label=e=>e?.getAttribute('aria-label')||e?.getAttribute('title')||'';
   const enabled=e=>!e.disabled&&e.getAttribute('aria-disabled')!=='true';
-  const formList=[...document.querySelectorAll(FORM)].filter(f=>[...f.querySelectorAll(EDITOR)].some(visible));
+  const allForms=[...document.querySelectorAll(FORM)];
+  const formList=allForms.filter(f=>[...f.querySelectorAll(EDITOR)].some(visible));
   const form=formList.length===1?formList[0]:null,editor=form&&[...form.querySelectorAll(EDITOR)].find(visible);
+  // Read-only local UI lookup. Return DOM nodes only to the caller in this world,
+  // never through extension messaging. The panel and sender share this selection.
+  if(args.cmd==='uiAnchor')return {form,editor,totalForms:allForms.length,visibleForms:formList.length};
   const pathId=location.pathname.match(/(?:^|\/)c\/([a-f0-9-]{20,64})(?:\/|$)/i)?.[1]||null;
   const localId=form?.querySelector('[data-above-composer-conversation-id]')?.getAttribute('data-above-composer-conversation-id')||null;
   const route=location.origin+location.pathname;
@@ -151,6 +155,8 @@ globalThis.CQPage = function CQPage(args) {
     .filter(x=>x.label&&!/^(dictate|dictar|microphone|micrófono|select chatgpt model)$/i.test(x.label)):[];
   const model={engine:modelButton?words(modelButton.textContent):null,effort:reasoning?.getAttribute('data-selected-reasoning-effort')||null,effortLabel:reasoning?words(reasoning.querySelector('[class*="ModelPickerTriggerLabel"]')?.textContent||reasoning.textContent):null};
   const snapshot={editorMethod:pmView()?'transaction':editor?.tagName==='TEXTAREA'?'textarea':editor?'native-edit':'unavailable',route,pathId,localId,title:document.title.replace(/\s*[-|·]\s*ChatGPT\s*$/i,''),state,sendEnabled:!!send&&enabled(send),text:textOf(editor),attachments:{count:at.count,items:at.items,unsupported:at.unsupported,loading:at.loading},blocked,lastUser,finalId,model,options,ready:!!editor,oldUserscript:!!document.getElementById('eros-tab-queue')};
+  const panels=[...document.querySelectorAll('#cq2-panel')];
+  snapshot.interface={formCount:allForms.length,activeFormCount:formList.length,panelCount:panels.length,panelVisible:panels.some(visible),renderedItems:panels.reduce((n,p)=>n+(p.shadowRoot?.querySelectorAll('.job').length||0),0)};
   function capture(){const v=pmView();return {...snapshot,doc:v?v.state.doc.toJSON():null,selection:v?{from:v.state.selection.from,to:v.state.selection.to}:null};}
   function replace(snapshot){
     ensureRoute();

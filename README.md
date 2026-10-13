@@ -42,6 +42,23 @@ v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
 Transfer files contain private data: never upload them to this repository.
 The transfer screen currently caps total attachment data at 256 MiB.
 
+## v0.6.2: queue panel recovery
+
+Fixes a reproducible mismatch where the sender recognized the active composer but the
+panel rejected the page because another, hidden composer was present. The panel now
+uses the same read-only composer selection as the sender. It remounts after page DOM
+replacement, reconciles missed state notifications on visibility/navigation and the
+existing heartbeat, and ignores late responses from a disposed script version.
+
+Diagnostics now distinguish active/hidden composers and panel presence from sender
+readiness. They do not include message text or attachments. No changes to queue
+storage, the sending coordinator, signing identity or permissions.
+
+Verified with 161 Node tests and 12 isolated Chromium UI regressions, including a
+separate ISOLATED execution world, native draft preservation, and desktop/mobile
+screenshots. Tests use an intercepted fixture and mocked extension RPC, not a live
+ChatGPT account. Existing limitations of background transport still apply.
+
 ## v0.6.0
 
 * Native signed-package update URL and reproducible CRX3 packaging.

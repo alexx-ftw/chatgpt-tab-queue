@@ -15,6 +15,11 @@ function reasonCategory(value) {
  if(/pausa|pause/i.test(text))return 'paused';
  return 'other';
 }
+function interfaceSummary(value){
+ if(!value||typeof value!=='object')return null;
+ const count=v=>Number.isSafeInteger(v)&&v>=0&&v<=10000?v:null;
+ return {formCount:count(value.formCount),activeFormCount:count(value.activeFormCount),panelCount:count(value.panelCount),panelVisible:value.panelVisible===true,renderedItems:count(value.renderedItems)};
+}
 function surfaceError(error) {
  const text=String(error?.message||'');
  if(/frame.*block|block.*frame/i.test(text))return 'Frame blocked';
@@ -36,7 +41,7 @@ export async function collectDiagnostics(state,io,version){
    const tab=await io.getTab(h.tabId);Object.assign(row.surface,{status:tab.status||'unknown',discarded:!!tab.discarded,frozen:!!tab.frozen});
    if(!tab.discarded&&!tab.frozen&&tab.status!=='loading'){
     const p=await io.page(h.tabId,{cmd:'inspect',conversationId:cid});
-    row.surface.page=p?{ready:!!p.ready,editorMethod:allowed(p.editorMethod,['transaction','textarea','native-edit','unavailable']),conversationId:p.pathId||null,state:allowed(p.state,['idle','busy','unknown']),sendEnabled:!!p.sendEnabled,blocked:!!p.blocked,blocker:reasonCategory(p.blocked),hasUser:!!p.lastUser?.id,hasFinal:!!p.finalId,attachmentCount:p.attachments?.count||0,unsupportedContext:!!p.attachments?.unsupported,effort:allowed(p.model?.effort,['none','minimal','low','medium','high','xhigh','max'],null)}:null;
+    row.surface.page=p?{ready:!!p.ready,interface:interfaceSummary(p.interface),editorMethod:allowed(p.editorMethod,['transaction','textarea','native-edit','unavailable']),conversationId:p.pathId||null,state:allowed(p.state,['idle','busy','unknown']),sendEnabled:!!p.sendEnabled,blocked:!!p.blocked,blocker:reasonCategory(p.blocked),hasUser:!!p.lastUser?.id,hasFinal:!!p.finalId,attachmentCount:p.attachments?.count||0,unsupportedContext:!!p.attachments?.unsupported,effort:allowed(p.model?.effort,['none','minimal','low','medium','high','xhigh','max'],null)}:null;
    }
   }catch(e){row.surface.error=surfaceError(e);}
   return row;

@@ -14,3 +14,11 @@ test('one unavailable surface does not remove diagnostic results for the rest',a
  const io={listTabs:async()=>[],getTab:async()=>{throw Error('Frame blocked: PRIVATE FILE.pdf');},page:async()=>{throw Error('Must not run');}};
  const r=await collect(s,io,'0.5.1');assert.equal(r.conversations[0].surface.error,'Frame blocked');assert.doesNotMatch(JSON.stringify(r),/PRIVATE/);
 });
+
+test('diagnostics distinguish sender readiness from queue panel visibility without leaking content',async()=>{
+ const collect=await load(),s=newState();s.helpers[A]={tabId:4};s.conversations[A]={id:A};
+ const io={listTabs:async()=>[],getTab:async()=>({status:'complete'}),page:async()=>({ready:true,state:'busy',pathId:A,interface:{formCount:2,activeFormCount:1,panelCount:0,panelVisible:false,renderedItems:0,text:'PRIVATE MESSAGE'}})};
+ const out=await collect(s,io,'0.6.2');
+ assert.deepEqual(out.conversations[0].surface.page.interface,{formCount:2,activeFormCount:1,panelCount:0,panelVisible:false,renderedItems:0});
+ assert.doesNotMatch(JSON.stringify(out),/PRIVATE/);
+});

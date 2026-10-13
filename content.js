@@ -42,13 +42,14 @@
  }
  async function refresh(){
   if(disposed)return;if(refreshing){refreshAgain=true;return;}refreshing=true;
-  try{state=await rpc('GET_STATE');render();}catch(e){console.debug('[ChatGPT Queue]',e.message);}
+  try{const fresh=await rpc('GET_STATE');if(disposed)return;state=fresh;render();}catch(e){if(!disposed)console.debug('[ChatGPT Queue]',e.message);}
   finally{refreshing=false;if(refreshAgain){refreshAgain=false;scheduleRefresh();}}
  }
- function scheduleRefresh(){if(refreshTimer)return;refreshTimer=setTimeout(()=>{refreshTimer=null;refresh();},100);}
+ function scheduleRefresh(){if(disposed||refreshTimer)return;refreshTimer=setTimeout(()=>{refreshTimer=null;refresh();},100);}
  function unmount(){host?.remove();host=null;shadow=null;signature='';}
  function mount(){
-  const forms=[...document.querySelectorAll(FORM)].filter(f=>f.querySelector(EDITOR));if(forms.length!==1){unmount();return false;}const form=forms[0];
+  const anchor=globalThis.CQPage({cmd:'uiAnchor'}),form=anchor?.form;
+  if(!form||!anchor.editor){unmount();return false;}
   if(!host){
    host=element('div');host.id='cq2-panel';host.style.cssText='display:block;min-width:0;width:100%;margin:0;position:relative;z-index:4';
    shadow=host.attachShadow({mode:'open'});
@@ -77,7 +78,7 @@
   return true;
  }
  function render(){
-  if(!state)return;
+  if(disposed||!state)return;
   const key=target().id,cid=state.aliases[key]||key,c=state.conversations[cid],jobs=state.jobs.filter(j=>j.conversationId===cid);
   // No helper banner, no idle toolbar, no UI in chats which have no pending messages.
   if(state.isHelper||!jobs.length){unmount();return;}
@@ -205,7 +206,10 @@
  },true);
  let lastReport='';
  async function heartbeat(force=false){
-  if(disposed)return;if(!state){await refresh();if(!state)return;}const snap=inspect(),t=target(snap);
+  if(disposed)return;
+  // State invalidations are best-effort. Recover from a missed notification on
+  // navigation/visibility and on the existing five-second heartbeat.
+  if(force||!state){await refresh();if(disposed||!state)return;}const snap=inspect(),t=target(snap);
   const seen=seenCards.get(t.id)||{};
   if(snap.attachments.count)seenCards.set(t.id,{...seen,hadCards:true});
   else if(seen.hadCards&&!saving&&Date.now()-(seen.capturedAt||0)>1500){nativeFiles.delete(t.id);seenCards.delete(t.id);}
@@ -214,17 +218,20 @@
   if(force||report!==lastReport){lastReport=report;await rpc('REPORT',{pathId:snap.pathId,state:snap.state,sidebar}).catch(()=>{});}
   if(!disposed)render();
  }
- function scheduleHeartbeat(){if(heartbeatTimer)return;heartbeatTimer=setTimeout(()=>{heartbeatTimer=null;heartbeat().catch(()=>{});},120);}
+ function scheduleHeartbeat(){if(disposed||heartbeatTimer)return;heartbeatTimer=setTimeout(()=>{heartbeatTimer=null;heartbeat().catch(()=>{});},120);}
  function start(){
-  refresh().then(()=>heartbeat(true));
+  heartbeat(true).catch(()=>{});
   observer=new MutationObserver(records=>{
    if(records.some(r=>{
+    // React may remove only our sibling panel while keeping the same form.
+    if(host&&[...r.removedNodes].some(n=>n===host||n.contains?.(host)))return true;
     if(r.target===host||r.target===toast||host?.contains(r.target))return false;
     if(r.target?.closest?.(FORM))return true;
+    if(r.type==='attributes'&&r.target?.querySelector?.(FORM))return true;
     return [...r.addedNodes,...r.removedNodes].some(n=>n.nodeType===1&&(n.matches?.(FORM)||n.querySelector?.(FORM)));
    }))scheduleHeartbeat();
   });
-  observer.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['aria-label','disabled','aria-disabled','data-map-composer-conversation','data-above-composer-conversation-id']});
+  observer.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['aria-label','disabled','aria-disabled','data-map-composer-conversation','data-above-composer-conversation-id','hidden','aria-hidden','inert','class','style']});
   interval=setInterval(()=>heartbeat(true).catch(()=>{}),5000);
   for(const name of ['pageshow','online','popstate'])listen(window,name,()=>heartbeat(true).catch(()=>{}));
   listen(document,'visibilitychange',()=>heartbeat(true).catch(()=>{}));
