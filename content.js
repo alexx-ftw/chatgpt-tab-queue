@@ -106,11 +106,12 @@
    const snap=await rpc('CAPTURE'),t=target(snap);
    if(snap.oldUserscript)throw Error('Desactiva el userscript anterior y recarga ChatGPT antes de encolar.');
    const native=globalThis.CQSelectCapturedFiles(snap.attachments,nativeCaptured(t.id));
-   if(!clean(snap.text)&&!native.length)return;
+   const queueText=snap.queueText??snap.text,queueDoc=Object.hasOwn(snap,'queueDoc')?snap.queueDoc:snap.doc;
+   if(!clean(queueText)&&!native.length)return;
    // Snapshot first. Never prevent typing, Enter, paste, menus or native attachment selection.
    for(const file of native)uploaded.push(await storeFile(file));
-   const answer=await rpc('ENQUEUE',{requestId:crypto.randomUUID(),target:t,text:snap.text,doc:snap.doc,model:snap.model,options:snap.options||[],fileIds:uploaded.map(f=>f.id)});jobId=answer.id;
-   await rpc('CLEAR_COMPOSER',{jobId,nativeFiles:native.map(f=>({name:f.name,type:f.type,size:f.size}))});
+   const answer=await rpc('ENQUEUE',{requestId:crypto.randomUUID(),target:t,text:queueText,doc:queueDoc,model:snap.model,options:snap.options||[],fileIds:uploaded.map(f=>f.id)});jobId=answer.id;
+   await rpc('CLEAR_COMPOSER',{jobId,sourceText:snap.text,sourceDoc:snap.doc,selectedTexts:snap.attachments.selections||[],nativeFiles:native.map(f=>({name:f.name,type:f.type,size:f.size}))});
    let empty=false;
    for(let n=0;n<20;n++){
     const fresh=inspect();if(target(fresh).id!==t.id)break;

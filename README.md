@@ -42,6 +42,36 @@ v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
 Transfer files contain private data: never upload them to this repository.
 The transfer screen currently caps total attachment data at 256 MiB.
 
+## v0.6.6: selecciones de texto, no archivos inexistentes
+
+Corrige la clasificación de la tarjeta nativa «Selection / Remove selected text»
+como si fuera un archivo local. Tab conserva el texto que esa tarjeta expone en
+el DOM como una cita identificada dentro del mensaje, seguida de la petición.
+No inventa un File ni pide volver a adjuntar una selección.
+
+- Varias selecciones conservan orden, espacios y saltos de línea; el recorte visual
+  CSS no recorta el texto disponible en el DOM.
+- Las selecciones pueden acompañar archivos locales; estos conservan sus bytes y
+  siguen pasando por la comprobación de originales.
+- La retirada usa los botones nativos, solo después de guardar el mensaje y
+  comprobar que la selección, los archivos y el borrador no han cambiado.
+- Si cambia el contenido durante el guardado, el pendiente queda para revisión;
+  no se sobrescribe el nuevo borrador ni se libera un envío parcial.
+- Corregida la lectura de párrafos vacíos en el editor alternativo: una cita
+  multilínea no añade saltos de línea al verificarse.
+
+**Alcance:** el transporte de selecciones es una cita de texto. No recrea el chip
+nativo ni sus anclajes o metadatos internos. Solo utiliza texto expuesto por la
+tarjeta, no contenido que la aplicación no proporcione. Referencias opacas,
+selecciones ilegibles y contexto adicional desconocido siguen bloqueándose.
+Enter conserva el envío nativo. No cambian permisos, identidad, almacenamiento,
+canal de actualizaciones ni la corrección del arranque automático de 0.6.5.
+
+Verificación: 238 pruebas Node y 63 comprobaciones de navegador, incluidas 26
+regresiones unitarias nuevas y 13 pruebas de selección. El navegador usa DOM real
+en un perfil de prueba, solicitudes interceptadas y comunicación de extensión
+simulada. No se ha probado esta revisión en una cuenta real de ChatGPT.
+
 ## v0.6.5: inicio automático, sin pausa heredada al reiniciar
 
 Corrige una pausa global que las versiones anteriores guardaban cada vez que

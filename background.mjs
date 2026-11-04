@@ -70,7 +70,7 @@ async function handle(m,sender){
   case 'CLEAR_COMPOSER':{
    const state=await store.getState(),job=state.jobs.find(j=>j.id===m.jobId);
    if(who.ui||!job||job.sourceTabId!==who.tabId||job.status!=='held')throw Error('El mensaje se ha retirado o cambió. No se ha tocado el borrador.');
-   return page(who.tabId,{cmd:'clear',conversationId:job.conversationId,localId:state.conversations[job.conversationId]?.localId,expectText:job.text,expectDoc:job.doc,expectedFiles:m.nativeFiles||[]});
+   return page(who.tabId,{cmd:'clear',conversationId:job.conversationId,localId:state.conversations[job.conversationId]?.localId,expectText:job.text,expectDoc:job.doc,expectedFiles:m.nativeFiles||[],sourceText:m.sourceText,sourceDoc:m.sourceDoc,selectedTexts:m.selectedTexts});
   }
   case 'RELEASE':{
    const {result:r}=await coordinator.change(s=>{const j=s.jobs.find(j=>j.id===m.id);if(!j||j.sourceTabId!==who.tabId||j.status!=='held')throw Error('El mensaje ya no está en espera.');j.status='queued';return true;});schedule();return r;

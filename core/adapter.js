@@ -138,14 +138,45 @@ globalThis.CQPage = function CQPage(args) {
       if(n.nodeType!==1)return '';
       if(links.has(n))return links.get(n);
       if(n.matches('br.ProseMirror-trailingBreak'))return '';
-      if(n.tagName==='BR')return '\n';
+      if(n.tagName==='BR'){
+        // A lone BR is the browser's placeholder for an empty paragraph. The
+        // surrounding block boundary already supplies its line break.
+        const parent=n.parentElement,siblings=parent?[...parent.childNodes].filter(x=>x.nodeType!==3||x.nodeValue!==''):[];
+        if(parent&&/^(P|DIV|LI|PRE|BLOCKQUOTE)$/i.test(parent.tagName)&&siblings.length===1)return '';
+        return '\n';
+      }
       const a=[...n.childNodes],blocks=/^(P|DIV|H[1-6]|LI|PRE|BLOCKQUOTE|UL|OL|TR)$/;
       return a.map((x,i)=>walk(x)+(a[i+1]&&((x.nodeType===1&&blocks.test(x.tagName))||(a[i+1].nodeType===1&&blocks.test(a[i+1].tagName)))?'\n':'')).join('');
     }
     return walk(e);
   }
+  const REMOVE_SELECTION=/^(?:remove selected text|(?:quitar|eliminar|retirar) (?:el )?texto seleccionado)\s+[1-9]\d*$/i;
+  function selectionFrom(remove,areas){
+    // Only the positively identified native Selection card is a text quotation.
+    // Do not treat a file, Library item, connector reference or generic preview as one.
+    for(let card=remove.parentElement;card&&card!==form&&!areas.includes(card);card=card.parentElement){
+      const removers=[...card.querySelectorAll('button,[role="button"]')].filter(b=>REMOVE.test(label(b)));
+      if(removers.length!==1||removers[0]!==remove)break;
+      const previews=[...card.querySelectorAll('[class*="whitespace-pre-wrap"]')];
+      const opener=[...card.querySelectorAll('button')].some(b=>/^(selection|selección|texto seleccionado)$/i.test(label(b)));
+      if(!previews.length||!opener)continue;
+      if(previews.length!==1)return null;
+      const preview=previews[0],nodes=[card,...card.querySelectorAll('*')];
+      if(!visible(preview)||nodes.some(opaqueReference)||card.querySelector('img,video,audio,canvas,iframe,object,embed,input,textarea'))return null;
+      if([preview,...preview.querySelectorAll('*')].some(n=>n.hasAttribute('hidden')||n.getAttribute('aria-hidden')==='true'||n.hasAttribute('inert')))return null;
+      const text=textOf(preview).replace(/\r\n?/g,'\n');
+      if(!text.trim()||text.length>2000000)return null;
+      return {text,remove,card};
+    }
+    return null;
+  }
+  const sameSelections=(actual,expected)=>Array.isArray(expected)&&actual.length===expected.length&&actual.every((s,i)=>s===expected[i]);
+  function quotedMessage(text,selections){
+    if(!selections.length)return text;
+    return '# Selected text:\n\n'+selections.map((s,i)=>`## Selection ${i+1}\n\n${s.split('\n').map(line=>'> '+line).join('\n')}`).join('\n\n')+'\n\n## My request:\n\n'+text;
+  }
   function attachments(){
-    if(!form)return {count:0,items:[],unsupported:false,loading:false,remove:[]};
+    if(!form)return {count:0,items:[],unsupported:false,loading:false,remove:[],selections:[],selectionError:''};
     const areas=[...form.querySelectorAll('[data-composer-attachments],[data-testid="attachments"]')].filter(e=>!e.hidden);
     const portal=form.querySelector('[data-above-composer-portal]');
     const active=areas.filter(a=>[...a.children].some(visible));
@@ -153,7 +184,14 @@ globalThis.CQPage = function CQPage(args) {
     for(const a of active)for(const b of a.querySelectorAll('button,[role="button"]'))if(REMOVE.test(label(b))&&visible(b)&&!remove.includes(b))remove.push(b);
     // Some legacy upload cards sit directly inside the form.
     if(!areas.length)for(const b of form.querySelectorAll('button'))if(/^(remove|quitar|eliminar) (file|archivo|attachment|adjunto|image|imagen)/i.test(label(b))&&visible(b))remove.push(b);
+    const selections=[],covered=[];let selectionError='';
     const items=remove.map(b=>{
+      if(REMOVE_SELECTION.test(label(b))){
+        const selected=selectionFrom(b,areas);
+        if(selected){selections.push(selected);covered.push(selected.card);}
+        else selectionError='No se puede leer con seguridad el texto de esta selección. El borrador sigue intacto.';
+        return {kind:'selection',text:selected?.text||null,label:label(b),image:false,name:null};
+      }
       let node=b.parentElement;
       for(let i=0;i<4&&node?.parentElement&&!areas.includes(node);i++){
         const others=[...node.querySelectorAll('button,[role="button"]')].filter(x=>REMOVE.test(label(x)));
@@ -162,19 +200,31 @@ globalThis.CQPage = function CQPage(args) {
         if(content||node.querySelector('img'))break;
         node=node.parentElement;
       }
+      if(node)covered.push(node);
       const bits=[label(b),...(node?[...node.querySelectorAll('[title],[alt],[data-file-name]')].flatMap(e=>[e.getAttribute('title'),e.getAttribute('alt'),e.getAttribute('data-file-name')]):[]),node?.innerText||node?.textContent||''].filter(Boolean);
-      return {label:words(bits.join(' ')),image:!!node?.querySelector('img'),name:node?.querySelector('[data-file-name]')?.getAttribute('data-file-name')||null};
+      return {kind:'file',label:words(bits.join(' ')),image:!!node?.querySelector('img'),name:node?.querySelector('[data-file-name]')?.getAttribute('data-file-name')||null};
     });
-    const count=remove.length||active.reduce((n,a)=>n+[...a.children].filter(visible).length,0);
-    const unsupported=inlineContexts().unsupported||!!(portal&&[...portal.children].some(visible))||(count>0&&remove.length!==count);
+    // React can leave an empty layout wrapper after the final card disappears.
+    // Unknown content/media/loading still counts; an empty wrapper is not a file.
+    const meaningful=e=>e.matches('[role="progressbar"],[data-file-name],[aria-busy="true"],[data-state="uploading"],[class*="animate-spin"]')||!!clean(e.textContent)||!!e.querySelector('img,svg,video,audio,canvas,iframe,button,[role="button"],[role="progressbar"],[data-file-name],[aria-busy="true"],[data-state="uploading"],[class*="animate-spin"]')||/^(IMG|SVG|VIDEO|AUDIO|CANVAS|IFRAME|BUTTON)$/i.test(e.tagName);
+    const count=remove.length||active.reduce((n,a)=>n+[...a.children].filter(e=>visible(e)&&meaningful(e)).length,0);
+    function unaccounted(node){
+      if(covered.some(root=>root===node||root.contains(node)))return false;
+      if(node.nodeType===3)return !!clean(node.nodeValue);
+      if(node.nodeType!==1||node.hasAttribute('hidden')||node.getAttribute('aria-hidden')==='true')return false;
+      if(opaqueReference(node)||/^(IMG|VIDEO|AUDIO|CANVAS|IFRAME|INPUT|BUTTON)$/i.test(node.tagName))return true;
+      return [...node.childNodes].some(unaccounted);
+    }
+    const unexplainedSelectionCompanion=selections.length>0&&active.some(unaccounted);
+    const unsupported=!!selectionError||unexplainedSelectionCompanion||inlineContexts().unsupported||!!(portal&&[...portal.children].some(visible))||(count>0&&remove.length!==count);
     const loading=active.some(a=>[...a.querySelectorAll('[role="progressbar"],[aria-busy="true"],[data-state="uploading"],[class*="animate-spin"]')].some(visible));
-    return {count,items,unsupported,loading,remove};
+    return {count,items,unsupported,loading,remove,selections,selectionError};
   }
   const at=attachments();
   const fileNameMatches=(card,name)=>card.name?card.name===name:(' '+words(card.label)+' ').includes(' '+words(name)+' ');
-  function matchesFiles(files){
-    if(at.unsupported||at.count!==files.length)return false;
-    const remaining=[...at.items];
+  function matchesFiles(files,expectedSelections=[]){
+    if(at.unsupported||!sameSelections(at.selections.map(s=>s.text),expectedSelections)||at.count!==files.length+expectedSelections.length)return false;
+    const remaining=at.items.filter(item=>item.kind!=='selection');
     for(const f of files){let i=remaining.findIndex(x=>fileNameMatches(x,f.name));
       if(i<0&&String(f.type).startsWith('image/'))i=remaining.findIndex(x=>x.image);
       if(i<0)return false;remaining.splice(i,1);
@@ -225,10 +275,20 @@ globalThis.CQPage = function CQPage(args) {
     .filter(visible).map(e=>({label:words(label(e)||e.textContent)}))
     .filter(x=>x.label&&!/^(dictate|dictar|microphone|micrófono|select chatgpt model)$/i.test(x.label)):[];
   const model={engine:modelButton?words(modelButton.textContent):null,effort:reasoning?.getAttribute('data-selected-reasoning-effort')||null,effortLabel:reasoning?words(reasoning.querySelector('[class*="ModelPickerTriggerLabel"]')?.textContent||reasoning.textContent):null};
-  const snapshot={editorMethod:pmView()?'transaction':editor?.tagName==='TEXTAREA'?'textarea':editor?'native-edit':'unavailable',route,pathId,localId,title:document.title.replace(/\s*[-|·]\s*ChatGPT\s*$/i,''),state,sendEnabled:!!send&&enabled(send),text:textOf(editor),attachments:{count:at.count,items:at.items,unsupported:at.unsupported,loading:at.loading},blocked,lastUser,finalId,model,options,ready:!!editor,oldUserscript:!!document.getElementById('eros-tab-queue')};
+  const snapshot={editorMethod:pmView()?'transaction':editor?.tagName==='TEXTAREA'?'textarea':editor?'native-edit':'unavailable',route,pathId,localId,title:document.title.replace(/\s*[-|·]\s*ChatGPT\s*$/i,''),state,sendEnabled:!!send&&enabled(send),text:textOf(editor),attachments:{count:at.count,items:at.items,unsupported:at.unsupported,loading:at.loading,selections:at.selections.map(s=>s.text),selectionError:at.selectionError},blocked,lastUser,finalId,model,options,ready:!!editor,oldUserscript:!!document.getElementById('eros-tab-queue')};
   const panels=[...document.querySelectorAll('#cq2-panel')];
   snapshot.interface={formCount:allForms.length,activeFormCount:formList.length,panelCount:panels.length,panelVisible:panels.some(visible),renderedItems:panels.reduce((n,p)=>n+(p.shadowRoot?.querySelectorAll('.job').length||0),0)};
-  function capture(){const v=pmView();return {...snapshot,doc:v?v.state.doc.toJSON():null,selection:v?{from:v.state.selection.from,to:v.state.selection.to}:null};}
+  function capture(){
+    const v=pmView(),doc=v?v.state.doc.toJSON():null;
+    // Preserve the raw capture for draft restoration. Only queue transport uses
+    // a textual quote, since native selection anchors cannot be recreated safely.
+    return {...snapshot,doc,selection:v?{from:v.state.selection.from,to:v.state.selection.to}:null,
+      queueText:quotedMessage(snapshot.text,at.selections.map(s=>s.text)),queueDoc:at.selections.length?null:doc};
+  }
+  function guardSource(){
+    if(args.guardText!==undefined&&snapshot.text!==args.guardText)throw Error('El borrador cambió durante el guardado. Se conserva la edición actual.');
+    if(args.guardDoc&&JSON.stringify(capture().doc)!==JSON.stringify(args.guardDoc))throw Error('El documento del editor cambió durante el guardado.');
+  }
   function replace(snapshot){
     ensureRoute();
     if((args.expectDoc&&JSON.stringify(capture().doc)!==JSON.stringify(args.expectDoc))||(args.expectText!==undefined&&clean(textOf(editor))!==clean(args.expectText)))throw Error('El borrador cambió. No se ha sobrescrito.');
@@ -466,35 +526,48 @@ globalThis.CQPage = function CQPage(args) {
     case 'write':replace(args.snapshot);return capture();
     case 'clear':{
       ensureRoute();
-      if((args.expectDoc&&JSON.stringify(capture().doc)!==JSON.stringify(args.expectDoc))||clean(snapshot.text)!==clean(args.expectText)||!matchesFiles(args.expectedFiles||[]))throw Error('El texto o los adjuntos cambiaron antes de encolar. Se conserva el borrador.');
+      const saved=capture(),selected=at.selections.map(s=>s.text);
+      if((args.expectDoc&&JSON.stringify(saved.queueDoc)!==JSON.stringify(args.expectDoc))||
+         clean(saved.queueText)!==clean(args.expectText)||!matchesFiles(args.expectedFiles||[],selected)||
+         (args.sourceText!==undefined&&snapshot.text!==args.sourceText)||
+         (args.sourceDoc&&JSON.stringify(saved.doc)!==JSON.stringify(args.sourceDoc))||
+         (args.selectedTexts!==undefined&&!sameSelections(selected,args.selectedTexts)))
+        throw Error('El texto, la selección o los adjuntos cambiaron antes de encolar. Se conserva el borrador.');
+      const guard={conversationId:args.conversationId,guardText:snapshot.text,guardDoc:saved.doc,rpcDeadline:args.rpcDeadline};
       return (async()=>{
-        await CQPage({cmd:'removeHelperFiles',conversationId:args.conversationId,expectedFiles:args.expectedFiles||[]});
+        await CQPage({cmd:'removeHelperFiles',...guard,expectedFiles:args.expectedFiles||[],expectedSelections:selected});
+        if(selected.length)await CQPage({cmd:'removeSelectedTexts',...guard,expectedSelections:selected});
         if(args.rpcDeadline&&Date.now()>args.rpcDeadline)throw Error('La limpieza del borrador ha caducado. Revisa el pendiente guardado.');
-        CQPage({cmd:'write',conversationId:args.conversationId,expectText:args.expectText,expectDoc:args.expectDoc,snapshot:{text:''}});
+        const check=CQPage({cmd:'verifyFiles',...guard,expectedFiles:[]});
+        if(!check.match)throw Error('El contexto del borrador cambió durante el guardado.');
+        CQPage({cmd:'write',conversationId:args.conversationId,expectText:snapshot.text,expectDoc:saved.doc,snapshot:{text:''},rpcDeadline:args.rpcDeadline});
         for(const i of form.querySelectorAll('input[type="file"]'))i.value='';
         return true;
       })();
     }
     case 'removeFirstFile':{
-      ensureRoute();if(!matchesFiles(args.expectedFiles||[]))throw Error('Los adjuntos cambiaron durante su retirada.');
-      if(!at.remove.length)return -1;
-      const item=at.items[0];let index=(args.expectedFiles||[]).findIndex(f=>fileNameMatches(item,f.name));
+      ensureRoute();guardSource();if(!matchesFiles(args.expectedFiles||[],args.expectedSelections||[]))throw Error('Los adjuntos o la selección cambiaron durante su retirada.');
+      const itemIndex=at.items.findIndex(item=>item.kind!=='selection');
+      if(itemIndex<0)return -1;
+      const item=at.items[itemIndex];let index=(args.expectedFiles||[]).findIndex(f=>fileNameMatches(item,f.name));
       if(index<0&&item.image)index=(args.expectedFiles||[]).findIndex(f=>f.type?.startsWith('image/'));
       if(index<0)throw Error('No se puede identificar el adjunto que se va a retirar.');
-      at.remove[0].click();return index;
+      at.remove[itemIndex].click();return index;
     }
     case 'removeHelperFiles':{
-      ensureRoute();if(!matchesFiles(args.expectedFiles||[]))throw Error('Hay adjuntos distintos de los que pertenecen al envío.');
+      ensureRoute();guardSource();if(!matchesFiles(args.expectedFiles||[],args.expectedSelections||[]))throw Error('Hay adjuntos o selecciones distintos de los guardados.');
       return (async()=>{
         const remaining=[...(args.expectedFiles||[])];
         while(remaining.length){
-          const count=remaining.length;
-          const index=CQPage({cmd:'removeFirstFile',conversationId:args.conversationId,expectedFiles:remaining});
+          const count=remaining.length+(args.expectedSelections?.length||0);
+          const index=CQPage({cmd:'removeFirstFile',conversationId:args.conversationId,expectedFiles:remaining,expectedSelections:args.expectedSelections,guardText:args.guardText,guardDoc:args.guardDoc,rpcDeadline:args.rpcDeadline});
           if(index<0)throw Error('No se pudo retirar el adjunto.');
           let removed=false;
           for(let n=0;n<20;n++){
             await new Promise(resolve=>setTimeout(resolve,75));
             const next=CQPage({cmd:'inspect'});if(args.conversationId&&!args.conversationId.startsWith('draft:')&&next.pathId!==args.conversationId)throw Error('La conversación cambió.');
+            if(args.guardText!==undefined&&next.text!==args.guardText)throw Error('El borrador cambió durante el guardado.');
+            if(!sameSelections(next.attachments.selections||[],args.expectedSelections||[]))throw Error('La selección cambió durante el guardado.');
             if(next.attachments.count===count-1){removed=true;break;}
           }
           if(!removed)throw Error('ChatGPT no retiró el adjunto. El original sigue guardado en la cola.');
@@ -503,7 +576,37 @@ globalThis.CQPage = function CQPage(args) {
         return true;
       })();
     }
-    case 'verifyFiles':return {match:matchesFiles(args.expectedFiles||[]),loading:at.loading,snapshot};
+    case 'removeFirstSelection':{
+      ensureRoute();guardSource();
+      if(!matchesFiles([],args.expectedSelections||[])||!at.selections.length)throw Error('La selección cambió durante el guardado.');
+      at.selections[0].remove.click();return true;
+    }
+    case 'removeSelectedTexts':{
+      ensureRoute();guardSource();
+      if(!matchesFiles([],args.expectedSelections||[]))throw Error('La selección cambió durante el guardado.');
+      return (async()=>{
+        const remaining=[...(args.expectedSelections||[])];
+        while(remaining.length){
+          const previous=[...remaining];
+          const result=CQPage({cmd:'removeFirstSelection',conversationId:args.conversationId,expectedSelections:remaining,guardText:args.guardText,guardDoc:args.guardDoc,rpcDeadline:args.rpcDeadline});
+          if(result!==true)throw Error('La retirada de la selección no se ha confirmado.');
+          remaining.shift();let removed=false;
+          for(let n=0;n<20;n++){
+            await new Promise(resolve=>setTimeout(resolve,50));
+            const next=CQPage({cmd:'capture',conversationId:args.conversationId});
+            if(args.guardText!==undefined&&next.text!==args.guardText)throw Error('El borrador cambió durante el guardado.');
+            if(args.guardDoc&&JSON.stringify(next.doc)!==JSON.stringify(args.guardDoc))throw Error('El documento del editor cambió durante el guardado.');
+            const actual=next.attachments.selections||[];
+            if(next.attachments.unsupported)throw Error('La selección ya no se puede verificar.');
+            if(sameSelections(actual,remaining)&&next.attachments.count===remaining.length){removed=true;break;}
+            if(!sameSelections(actual,previous))throw Error('La selección cambió durante su retirada.');
+          }
+          if(!removed)throw Error('ChatGPT no retiró la selección. El texto sigue guardado en la cola para revisión.');
+        }
+        return true;
+      })();
+    }
+    case 'verifyFiles':guardSource();return {match:matchesFiles(args.expectedFiles||[],args.expectedSelections||[]),loading:at.loading,snapshot};
     case 'send':{
       ensureRoute();
       const lease=globalThis[LOCAL];

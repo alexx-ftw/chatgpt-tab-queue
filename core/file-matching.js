@@ -2,11 +2,14 @@
 'use strict';
 /** Match captured File objects to native composer cards; ambiguous references are never discarded. */
 function selectCapturedFiles(attachments,captured){
+ if(attachments.selectionError)throw Error(attachments.selectionError);
  if(attachments.unsupported)throw Error('Este adjunto o referencia nativa todavía no se puede conservar con seguridad en la cola. El borrador sigue intacto y puedes enviarlo normalmente con Enter.');
  if(!attachments.count)return [];
  const rest=[...captured],selected=[];
- const cards=attachments.items||[];
- if(cards.length!==attachments.count)throw Error('No se reconocen todos los adjuntos. El borrador se conserva; vuelve a adjuntar esos archivos con el adjuntador normal de ChatGPT.');
+ const allCards=attachments.items||[];
+ const cards=allCards.filter(card=>card.kind!=='selection');
+ if(allCards.some(card=>card.kind==='selection'&&(typeof card.text!=='string'||!card.text.trim())))throw Error('No se puede leer el texto de la selección. El borrador se conserva.');
+ if(allCards.length!==attachments.count)throw Error('No se reconocen todos los adjuntos. El borrador se conserva; vuelve a adjuntar esos archivos con el adjuntador normal de ChatGPT.');
  for(const card of cards){
    const matches=rest.filter(f=>card.name ? card.name===f.name :
      (' '+String(card.label||'').replace(/\s+/g,' ')+' ').includes(' '+f.name.replace(/\s+/g,' ')+' '));
