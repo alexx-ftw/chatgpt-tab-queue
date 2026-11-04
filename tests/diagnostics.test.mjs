@@ -22,3 +22,9 @@ test('diagnostics distinguish sender readiness from queue panel visibility witho
  assert.deepEqual(out.conversations[0].surface.page.interface,{formCount:2,activeFormCount:1,panelCount:0,panelVisible:false,renderedItems:0});
  assert.doesNotMatch(JSON.stringify(out),/PRIVATE/);
 });
+test('confirmation diagnostics explain late receipts without revealing text, identities or filenames',async()=>{
+ const collect=await load(),s=newState();const job=addJob(s,{target:{id:A,url:`https://chatgpt.com/c/${A}`},text:'PRIVATE EXPECTED',files:[],sourceTabId:4});job.status='uncertain';job.attempt={beforeUser:'PRIVATE OLD ID',token:'PRIVATE TOKEN',tabId:4};s.helpers[A]={tabId:4};
+ const calls=[];const io={listTabs:async()=>[],getTab:async()=>({status:'complete'}),page:async(_id,args)=>{calls.push(args);return {ready:true,pathId:A,state:'idle',lastUser:{id:'PRIVATE LATER ID',text:'PRIVATE OTHER'},receiptAnchorFound:true,receiptAnchorAmbiguous:false,submittedUser:{id:'PRIVATE SENT ID',text:'PRIVATE EXPECTED',textCandidates:['PRIVATE EXPECTED'],files:[]},receiptUserCount:3};}};
+ const r=await collect(s,io,'0.6.7');const p=r.conversations[0].surface.page.confirmation;
+ assert.equal(p?.baselineFound,true);assert.equal(p?.candidateMatches,true);assert.equal(p?.latestMatches,false);assert.equal(p?.confirmed,true);assert.equal(p?.loadedUserMessages,3);assert.equal(calls[0].receiptAfter,'PRIVATE OLD ID');assert.doesNotMatch(JSON.stringify(r),/PRIVATE/);
+});

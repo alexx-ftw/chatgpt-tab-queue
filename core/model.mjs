@@ -62,13 +62,23 @@ export function markSubmitting(s,id,now=Date.now()) {
 }
 export function receiptMatches(j,user) {
   if(!user?.id||user.id===j.attempt?.beforeUser) return false;
-  if(comparable(user.text)!==comparable(j.text)) return false;
+  const texts=[user.text,...(Array.isArray(user.textCandidates)?user.textCandidates:[])].filter(t=>typeof t==='string');
+  if(!texts.some(t=>comparable(t)===comparable(j.text))) return false;
   const names=[...(user.files||[])];
   let unnamedImages=0;
   for(const f of j.files){const at=names.indexOf(f.name);if(at>=0)names.splice(at,1);else if(f.type?.startsWith('image/'))unnamedImages++;else return false;}
   return !unnamedImages||(Number(user.imageCount)>=j.files.filter(f=>f.type?.startsWith('image/')).length);
 
 }
+/** Select only a verified immediate successor when the baseline is loaded.
+ * A missing known baseline cannot prove chronology; new chats have no baseline. */
+export function confirmedReceipt(job,snapshot){
+  if(!snapshot||snapshot.receiptAnchorAmbiguous)return null;
+  if(snapshot.receiptAnchorFound===false&&job.attempt?.beforeUser)return null;
+  const candidate=snapshot.receiptAnchorFound?snapshot.submittedUser:snapshot.lastUser;
+  return receiptMatches(job,candidate)?candidate:null;
+}
+export const ACK_TIMEOUT_REASON='ChatGPT no ha confirmado el envío. Revisa esta pestaña antes de continuar.';
 export function acknowledge(s,id,user,snapshot,now=Date.now()) {
   const i=s.jobs.findIndex(j=>j.id===id),j=s.jobs[i];
   if(!j||!['submitting','uncertain'].includes(j.status)||!receiptMatches(j,user)) throw Error('El envío no está confirmado.');
@@ -84,6 +94,12 @@ export function acknowledge(s,id,user,snapshot,now=Date.now()) {
   c.waiting={receiptId:user.id,beforeFinal:j.attempt.beforeFinal,sawBusy:snapshot.state==='busy',since:now};
   c.nextCheckAt=0;
   s.jobs.splice(i,1);
+  // A proven late receipt resolves the timeout that paused this lane. Preserve
+  // manual/global/import/unknown pauses and other jobs requiring review.
+  if(c.paused&&c.reason===ACK_TIMEOUT_REASON&&j.reason===ACK_TIMEOUT_REASON&&
+     !s.jobs.some(x=>x.conversationId===cid&&['held','error','uncertain','submitting','preparing'].includes(x.status))){
+    c.paused=false;c.reason='';
+  }
   // History is metadata only; sent text and file bytes are not retained in history.
   s.history.unshift({id:j.id,conversationId:cid,sentAt:now,fileCount:j.files.length});s.history=s.history.slice(0,100);
   return j;

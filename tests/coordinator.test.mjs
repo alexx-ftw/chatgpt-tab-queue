@@ -164,3 +164,27 @@ test('update migration repairs legacy automatic pause before coordinator dispatc
  await steps(f,24);assert.equal(f.s.jobs.length,0);
  assert.equal(f.calls.filter(x=>x[0]==='page'&&['send','localSend'].includes(x[2])).length,1);
 });
+
+// Reconcile an already-sent message; these tests must never invoke Send.
+async function uncertainQuoteFixture({manual=false,changed=false,routeChanged=false}={}){
+ const {dom}=await import('./dom-harness.mjs');
+ const {ACK_TIMEOUT_REASON,recoverAfterUpdate}=await import('../core/model.mjs');
+ const f=fixture(),text='# Selected text:\n\n## Selection 1\n\n> Quoted source\n\n## My request:\n\nFollow-up';
+ const j=f.add(A,text);
+ await f.store.changeState(s=>{markPreparing(s,j.id,4,{lastUser:{id:'old'},finalId:'old-answer'},1);markSubmitting(s,j.id,2);const x=s.jobs[0];x.status='uncertain';x.reason=ACK_TIMEOUT_REASON;s.conversations[A].paused=true;s.conversations[A].reason=manual?'Pausa manual':ACK_TIMEOUT_REASON;recoverAfterUpdate(s);});
+ const html=`<html><body><main><div data-user-message-bubble="true" data-message-id="old"><div data-message-text="">Before</div></div><div data-user-message-bubble="true" data-message-id="sent"><div class="markdown"><h1>Selected text:</h1><h2>Selection 1</h2><blockquote><p>${changed?'Different source':'Quoted source'}</p></blockquote><h2>My request:</h2><p>Follow-up</p></div></div><div data-user-message-bubble="true" data-message-id="later"><div data-message-text="">Manual follow-up after sending</div></div><form data-chatgpt-composer=""><div data-composer-markdown="" contenteditable="true" role="textbox"><p>Untouched draft</p></div><button aria-label="Start Voice"></button></form></main></body></html>`;
+ const real=dom(html,`https://chatgpt.com/c/${routeChanged?B:A}`),base=f.io.page;
+ const queried=[];
+ f.io.page=async(id,args)=>{if(args.cmd==='inspect'&&Object.hasOwn(args,'receiptAfter')){queried.push(args);return real.page(args);}return base(id,args);};
+ f.pages.get(4).state='idle';f.pages.get(4).lastUser={id:'later',text:'Manual follow-up after sending',files:[]};f.pages.get(4).finalId='completed';
+ return {f,queried,real};
+}
+test('late formatted receipt is acknowledged after update and later manual messages, with zero resends',async()=>{
+ const {f,queried,real}=await uncertainQuoteFixture();await steps(f,18);
+ assert.equal(f.s.jobs.length,0);assert.equal(f.s.conversations[A].paused,false);assert.equal(f.s.conversations[A].waiting,null);assert.equal(f.s.history.length,1);
+ assert.ok(queried.some(x=>x.receiptAfter==='old'&&x.conversationId===A));
+ assert.equal(f.calls.filter(x=>x[0]==='page'&&['send','localSend'].includes(x[2])).length,0);assert.equal(real.page().text,'Untouched draft');
+});
+test('a late receipt removes the sent job but preserves an explicit manual pause',async()=>{const {f}=await uncertainQuoteFixture({manual:true});await steps(f,12);assert.equal(f.s.jobs.length,0);assert.equal(f.s.conversations[A].paused,true);assert.equal(f.s.conversations[A].reason,'Pausa manual');assert.ok(!f.calls.some(x=>['send','localSend'].includes(x[2])));});
+test('different quoted content remains uncertain and is not retried',async()=>{const {f}=await uncertainQuoteFixture({changed:true});await steps(f,18);assert.equal(f.s.jobs.length,1);assert.equal(f.s.jobs[0].status,'uncertain');assert.equal(f.s.conversations[A].paused,true);assert.ok(!f.calls.some(x=>['send','localSend'].includes(x[2])));});
+test('conversation navigation between two reads cannot acknowledge another chat',async()=>{const {f}=await uncertainQuoteFixture({routeChanged:true});await steps(f,18);assert.equal(f.s.jobs.length,1);assert.equal(f.s.jobs[0].status,'uncertain');assert.equal(f.s.history.length,0);assert.ok(!f.calls.some(x=>['send','localSend'].includes(x[2])));});

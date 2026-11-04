@@ -1,3 +1,4 @@
+import {receiptMatches,confirmedReceipt} from './model.mjs';
 /** Read-only diagnostic projection. Never include prompts, documents, filenames,
  * binary data, draft backups, attempt tokens, conversation titles or auth state. */
 const allowed = (value, values, fallback = 'unknown') => values.includes(value) ? value : fallback;
@@ -40,8 +41,15 @@ export async function collectDiagnostics(state,io,version){
   try{
    const tab=await io.getTab(h.tabId);Object.assign(row.surface,{status:tab.status||'unknown',discarded:!!tab.discarded,frozen:!!tab.frozen});
    if(!tab.discarded&&!tab.frozen&&tab.status!=='loading'){
-    const p=await io.page(h.tabId,{cmd:'inspect',conversationId:cid});
+    const pending=(state.jobs||[]).find(j=>j.conversationId===cid&&['submitting','uncertain'].includes(j.status));
+    const p=await io.page(h.tabId,{cmd:'inspect',conversationId:cid,...(pending?{receiptAfter:pending.attempt?.beforeUser??null,expectedFiles:pending.files||[]}: {})});
     row.surface.page=p?{ready:!!p.ready,interface:interfaceSummary(p.interface),editorMethod:allowed(p.editorMethod,['transaction','textarea','native-edit','unavailable']),conversationId:p.pathId||null,state:allowed(p.state,['idle','busy','unknown']),sendEnabled:!!p.sendEnabled,blocked:!!p.blocked,blocker:reasonCategory(p.blocked),hasUser:!!p.lastUser?.id,hasFinal:!!p.finalId,attachmentCount:p.attachments?.count||0,unsupportedContext:!!p.attachments?.unsupported,effort:allowed(p.model?.effort,['none','minimal','low','medium','high','xhigh','max'],null)}:null;
+    if(p&&pending)row.surface.page.confirmation={
+      baselineFound:p.receiptAnchorFound===true,baselineAmbiguous:p.receiptAnchorAmbiguous===true,
+      hasCandidate:!!p.submittedUser?.id,latestMatches:receiptMatches(pending,p.lastUser),
+      candidateMatches:receiptMatches(pending,p.submittedUser),confirmed:!!confirmedReceipt(pending,p),
+      loadedUserMessages:Number.isSafeInteger(p.receiptUserCount)?p.receiptUserCount:null
+    };
    }
   }catch(e){row.surface.error=surfaceError(e);}
   return row;

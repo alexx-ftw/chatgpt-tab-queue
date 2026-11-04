@@ -1,4 +1,4 @@
-import {canonical,addJob,markPreparing,markSubmitting,acknowledge,receiptMatches,reconcileWait,clearQueue,targetFromURL,migrateState} from './model.mjs';
+import {canonical,addJob,markPreparing,markSubmitting,acknowledge,confirmedReceipt,ACK_TIMEOUT_REASON,reconcileWait,clearQueue,targetFromURL,migrateState} from './model.mjs';
 
 /** Durable per-conversation lanes; browser waits in A never block B. io is the only browser dependency (also used by tests). */
 export function createCoordinator({store,io}) {
@@ -326,12 +326,13 @@ export function createCoordinator({store,io}) {
     // Even a completed load may have been navigated manually. Never send into another chat.
     if(!c.isNew&&snap.pathId!==cid){await note(cid,'Esta pestaña está en otra conversación. La cola continúa al volver.');return;}
     if(j&&['submitting','uncertain'].includes(j.status)){
-      const withFiles=await io.page(tab.id,{cmd:'inspect',expectedFiles:j.files});
-      if(!withFiles||typeof withFiles!=='object')return;
-      if(receiptMatches(j,withFiles.lastUser)){
+      const withFiles=await io.page(tab.id,{cmd:'inspect',conversationId:cid,expectedFiles:j.files,receiptAfter:j.attempt?.beforeUser??null});
+      if(!withFiles||typeof withFiles!=='object'||(!c.isNew&&withFiles.pathId!==cid))return;
+      const confirmed=confirmedReceipt(j,withFiles);
+      if(confirmed){
         const {result:sent}=await change(s=>{
           if(!find(s,j.id))return null;
-          const removed=acknowledge(s,j.id,withFiles.lastUser,{...withFiles,target:withFiles.pathId?targetFromURL(withFiles.route):null},now());
+          const removed=acknowledge(s,j.id,confirmed,{...withFiles,target:withFiles.pathId?targetFromURL(withFiles.route):null},now());
           const helper=Object.values(s.helpers).find(x=>x.tabId===tab.id);if(helper)helper.jobId=null;return removed;
         });
         if(sent){
@@ -339,7 +340,7 @@ export function createCoordinator({store,io}) {
           const previous=sent.attempt?.tabId;
           if(previous!==tab.id&&String(previous).startsWith('frame:'))try{await io.releaseBackground?.(previous);}catch{}
         }
-      }else if(j.status==='submitting'&&now()-j.attempt.clickedAt>s.settings.ackMs){await fail(j.id,'ChatGPT no ha confirmado el envío. Revisa esta pestaña antes de continuar.',true);}
+      }else if(j.status==='submitting'&&now()-j.attempt.clickedAt>s.settings.ackMs){await fail(j.id,ACK_TIMEOUT_REASON,true);}
       return;
     }
     if(j?.status==='preparing'){

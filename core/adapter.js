@@ -240,18 +240,60 @@ globalThis.CQPage = function CQPage(args) {
   function messageId(e){const parent=e?.closest('[data-chatgpt-search-message-ids],[data-message-id],[data-turn-key]');return parent?.getAttribute('data-chatgpt-search-message-ids')?.split(' ')[0]||parent?.getAttribute('data-message-id')||parent?.getAttribute('data-turn-key')||null;}
   const scope=form?.closest('[data-app-shell-focus-area="main"]')||form?.closest('main')||document;
   const users=[...scope.querySelectorAll('[data-user-message-bubble="true"],[data-message-author-role="user"]')].filter((e,i,a)=>!a.some(x=>x!==e&&e.contains(x)));
+  // Confirm the complete user message, never the first search-highlight block.
+  // Reading is local and side-effect free. These variants retain formatting
+  // markers; matching never strips punctuation or accepts a substring.
+  const RECEIPT_TEXT='[data-message-text],[data-message-content],.whitespace-pre-wrap,[data-search-result-target],.markdown';
+  const receiptExcluded=n=>n?.nodeType===1&&(n.matches('button,[role="button"],svg,script,style,input,textarea,form,[hidden],[aria-hidden="true"],[inert],[data-markdown-copy="exclude"],[data-file-name],[data-composer-attachments]')||getComputedStyle(n).display==='none'||getComputedStyle(n).visibility==='hidden');
+  function receiptText(node,markdown=false){
+    if(node.nodeType===3)return node.nodeValue;
+    if(node.nodeType!==1||receiptExcluded(node))return '';
+    const tag=String(node.tagName).toUpperCase();
+    if(tag==='IMG')return ''; // File/image proof is verified separately.
+    if(tag==='BR')return '\n';
+    const children=[...node.childNodes];
+    const block=n=>n?.nodeType===1&&/^(P|DIV|H[1-6]|BLOCKQUOTE|UL|OL|LI|PRE|TABLE|TR|SECTION)$/.test(String(n.tagName).toUpperCase());
+    const value=children.map((n,i)=>receiptText(n,markdown)+(children[i+1]&&(block(n)||block(children[i+1]))?(markdown?'\n\n':'\n'):'')).join('');
+    if(!markdown)return value;
+    if(/^H[1-6]$/.test(tag))return '#'.repeat(Number(tag.slice(1)))+' '+clean(value);
+    if(tag==='BLOCKQUOTE')return clean(value).split('\n').map(line=>'> '+line).join('\n');
+    if(tag==='STRONG'||tag==='B')return '**'+value+'**';
+    if(tag==='EM'||tag==='I')return '*'+value+'*';
+    if(tag==='DEL'||tag==='S')return '~~'+value+'~~';
+    if(tag==='A'){
+      const href=node.getAttribute('href');
+      return href&&clean(value)!==href?'['+value+']('+href+')':value;
+    }
+    if(tag==='CODE'&&String(node.parentElement?.tagName).toUpperCase()!=='PRE')return '`'+value+'`';
+    if(tag==='PRE'){
+      const language=node.querySelector('code')?.getAttribute('class')?.match(/(?:^|\s)language-([\w+-]+)/)?.[1]||'';
+      return '```'+language+'\n'+value.replace(/\n$/,'')+'\n```';
+    }
+    if(tag==='LI'){
+      const ordered=String(node.parentElement?.tagName).toUpperCase()==='OL';
+      const start=Number(node.parentElement?.getAttribute('start')||1);
+      const index=ordered?[...node.parentElement.children].indexOf(node):0;
+      return (ordered?String(start+index)+'. ':'- ')+clean(value);
+    }
+    return value;
+  }
   function receipt(e){
     if(!e)return null;
-    const textEl=e.querySelector('[data-message-text],.whitespace-pre-wrap,[data-search-result-target]');
-    const text=textEl?(textEl.innerText||textOf(textEl)):'';
+    const matches=[...(e.matches(RECEIPT_TEXT)?[e]:[]),...e.querySelectorAll(RECEIPT_TEXT)];
+    const roots=matches.filter(x=>!receiptExcluded(x)&&!matches.some(p=>p!==x&&p.contains(x)));
+    if(!roots.length)roots.push(e);
+    const text=clean(roots.map(n=>receiptText(n)).join('\n'));
+    const markdown=clean(roots.map(n=>receiptText(n,true)).join('\n\n'));
+    const textCandidates=[...new Set([text,markdown])];
     const files=[];
-    const candidates=[...e.querySelectorAll('[data-file-name],[title],[download],[aria-label]')].filter(x=>!textEl?.contains(x));
+    const inText=x=>roots.some(r=>r!==e&&r.contains(x));
+    const candidates=[...e.querySelectorAll('[data-file-name],[title],[download],[aria-label]')].filter(x=>!inText(x));
     for(const x of candidates){const s=x.getAttribute('data-file-name')||x.getAttribute('download')||x.getAttribute('title')||x.getAttribute('aria-label');if(s&&/\.[a-z0-9]{1,12}$/i.test(s)&&!files.includes(s))files.push(s);}
     for(const f of args.expectedFiles||[]){
-      const leaves=[...e.querySelectorAll('*')].filter(x=>!x.children.length&&!textEl?.contains(x));
+      const leaves=[...e.querySelectorAll('*')].filter(x=>!x.children.length&&!inText(x));
       if(!files.includes(f.name)&&leaves.some(x=>clean(x.textContent)===f.name))files.push(f.name);
     }
-    return {id:messageId(e),text:clean(text),files,imageCount:e.querySelectorAll('img').length};
+    return {id:messageId(e),text,textCandidates,files,imageCount:e.querySelectorAll('img').length,textRootCount:roots.length};
   }
   const lastUser=receipt(users.at(-1));
   const turns=[...scope.querySelectorAll('[data-turn-key]')],turn=turns.at(-1);
@@ -276,6 +318,15 @@ globalThis.CQPage = function CQPage(args) {
     .filter(x=>x.label&&!/^(dictate|dictar|microphone|micrófono|select chatgpt model)$/i.test(x.label)):[];
   const model={engine:modelButton?words(modelButton.textContent):null,effort:reasoning?.getAttribute('data-selected-reasoning-effort')||null,effortLabel:reasoning?words(reasoning.querySelector('[class*="ModelPickerTriggerLabel"]')?.textContent||reasoning.textContent):null};
   const snapshot={editorMethod:pmView()?'transaction':editor?.tagName==='TEXTAREA'?'textarea':editor?'native-edit':'unavailable',route,pathId,localId,title:document.title.replace(/\s*[-|·]\s*ChatGPT\s*$/i,''),state,sendEnabled:!!send&&enabled(send),text:textOf(editor),attachments:{count:at.count,items:at.items,unsupported:at.unsupported,loading:at.loading,selections:at.selections.map(s=>s.text),selectionError:at.selectionError},blocked,lastUser,finalId,model,options,ready:!!editor,oldUserscript:!!document.getElementById('eros-tab-queue')};
+  // Historical lookup is limited to the first user message after the saved
+  // pre-send baseline. Never scan arbitrary old identical messages for a match.
+  if(Object.hasOwn(args,'receiptAfter')){
+    const anchors=args.receiptAfter?users.map((e,i)=>messageId(e)===args.receiptAfter?i:-1).filter(i=>i>=0):[];
+    snapshot.receiptAnchorFound=anchors.length===1;
+    snapshot.receiptAnchorAmbiguous=anchors.length>1;
+    snapshot.submittedUser=anchors.length===1?receipt(users[anchors[0]+1]):null;
+    snapshot.receiptUserCount=users.length;
+  }
   const panels=[...document.querySelectorAll('#cq2-panel')];
   snapshot.interface={formCount:allForms.length,activeFormCount:formList.length,panelCount:panels.length,panelVisible:panels.some(visible),renderedItems:panels.reduce((n,p)=>n+(p.shadowRoot?.querySelectorAll('.job').length||0),0)};
   function capture(){

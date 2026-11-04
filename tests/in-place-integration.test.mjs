@@ -5,7 +5,8 @@ import {dom} from './dom-harness.mjs';
 import {newState,addJob} from '../core/model.mjs';import {createCoordinator} from '../core/coordinator.mjs';
 const A='11111111-1111-4111-8111-111111111111';
 const html=`<html><body><main>
-<div data-user-message-bubble="true" data-message-id="old"><span data-message-text="">antes</span><span id="receipt-file"></span></div>
+<div data-user-message-bubble="true" data-message-id="old"><span data-message-text="">antes</span></div>
+<div id="next-receipt"><span data-message-text=""></span><span id="receipt-file"></span></div>
 <form data-chatgpt-composer="" data-composer-placement="thread">
 <div data-composer-attachments="" hidden=""><div id="card"><span>proof.pdf</span><button aria-label="Remove proof.pdf"></button></div></div>
 <div data-composer-markdown="" contenteditable="true" class="ProseMirror" role="textbox"><p>mi borrador sin terminar</p></div><button aria-label="Send"></button></form>
@@ -20,8 +21,11 @@ function fixture(){
  d.querySelector('[aria-label="Remove proof.pdf"]').click=()=>area.setAttribute('hidden','');
  d.querySelector('[aria-label="Send"]').click=function(){
   sent.push({text:p.textContent,files:area.hasAttribute('hidden')?[]:['proof.pdf']});
-  d.querySelector('[data-user-message-bubble]').setAttribute('data-message-id','sent-'+(++serial));
-  d.querySelector('[data-message-text]').textContent=p.textContent;
+  // A real transcript adds a new user message instead of renaming the previous
+  // one. Keep the saved baseline available to verify chronological receipts.
+  const receipt=d.querySelector('#next-receipt');receipt.setAttribute('data-user-message-bubble','true');
+  receipt.setAttribute('data-message-id','sent-'+(++serial));
+  receipt.querySelector('[data-message-text]').textContent=p.textContent;
   if(!area.hasAttribute('hidden'))d.querySelector('#receipt-file').setAttribute('data-file-name','proof.pdf');
   p.textContent='';area.setAttribute('hidden','');this.setAttribute('aria-label','Stop');
  };

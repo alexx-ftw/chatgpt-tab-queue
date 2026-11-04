@@ -42,6 +42,35 @@ v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
 Transfer files contain private data: never upload them to this repository.
 The transfer screen currently caps total attachment data at 256 MiB.
 
+## v0.6.7: confirmar los mensajes ya enviados sin repetirlos
+
+Corrige fallos reproducidos en la lectura de la confirmación: solo se leía el
+primer bloque de texto y solo se comparaba el último mensaje del chat. Una cita
+formateada o un mensaje manual posterior podían dejar el envío como incierto.
+
+- Lee la burbuja completa sin duplicar bloques anidados ni incluir controles.
+- Admite texto íntegro y reconstrucción conservadora de Markdown; nunca confirma
+  por una coincidencia parcial ni por el mero hecho de existir una respuesta.
+- Comprueba el sucesor inmediato del mensaje anterior guardado al enviar, aunque
+  después haya otros mensajes. Si ese anclaje conocido falta o es ambiguo, conserva
+  el pendiente para revisión. Los chats nuevos no necesitan un anclaje anterior.
+- Una confirmación válida retira el pendiente sin pulsar Enviar de nuevo y levanta
+  solo su pausa automática por timeout, si no hay otros pendientes para revisión.
+  Las pausas manuales, globales e importadas permanecen intactas.
+- El diagnóstico indica coincidencias y presencia del anclaje sin revelar textos,
+  nombres de archivos ni identificadores de los mensajes del historial.
+
+No cambian identidad firmada, permisos, base de datos, auto-update, captura de
+adjuntos o selecciones ni controles nativos. No abre ni navega pestañas para
+confirmar. Los límites anteriores del envío en segundo plano no cambian.
+
+Verificado con 264 pruebas Node y 8 pruebas en Camoufox, usando el adaptador DOM,
+modelo y coordinador de producción. Perfil aislado, almacenamiento en memoria y
+mensajería simulada; todas las solicitudes interceptadas. Se comprobó que el panel
+desaparece al confirmar, el borrador se conserva y hay cero clics en Enviar, también
+con mensajes posteriores y en vistas de 1080 y 390 px. No es validación dentro de
+una cuenta real de ChatGPT ni del ciclo real de actualización del navegador.
+
 ## v0.6.6: selecciones de texto, no archivos inexistentes
 
 Corrige la clasificación de la tarjeta nativa «Selection / Remove selected text»
