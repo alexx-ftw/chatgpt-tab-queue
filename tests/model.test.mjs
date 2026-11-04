@@ -60,7 +60,7 @@ test('text plus files cannot ACK a text-only submission',()=>{
 });
 test('browser restart never blindly retries a possibly sent message',()=>{
  const s=newState(),j=addJob(s,payload(),1);markPreparing(s,j.id,12,{},2);markSubmitting(s,j.id,3);recoverAfterRestart(s);
- assert.equal(s.jobs[0].status,'uncertain'); assert.equal(s.paused,true);
+ assert.equal(s.jobs[0].status,'uncertain'); assert.equal(s.conversations[A].paused,true); assert.equal(s.paused,false);
 });
 test('initial homepage supported as a local draft target',()=>{const t=targetFromURL('https://chatgpt.com/','draft:4:abc');assert.equal(t.id,'draft:4:abc');assert.equal(t.isNew,true);});
 test('new chat acknowledgement adopts real conversation for remaining jobs',()=>{

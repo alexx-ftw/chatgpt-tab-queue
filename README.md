@@ -42,6 +42,28 @@ v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
 Transfer files contain private data: never upload them to this repository.
 The transfer screen currently caps total attachment data at 256 MiB.
 
+## v0.6.5: inicio automático, sin pausa heredada al reiniciar
+
+Corrige una pausa global que las versiones anteriores guardaban cada vez que
+se reiniciaba el navegador con pendientes o con una respuesta todavía en curso.
+Esa pausa podía quedarse activa incluso al crear una cola nueva.
+
+- Los pendientes normales conservan su ejecución automática tras reiniciar.
+- La actualización elimina la pausa automática heredada que se identifique
+  exactamente como recuperación tras reinicio; no borra mensajes ni archivos.
+- Las pausas manuales (incluida la de editar) y las importaciones siguen pausadas.
+  Una pausa de origen desconocido no se elimina.
+- Preparaciones interrumpidas, borradores sin confirmar y posibles envíos quedan
+  para revisión solo en su conversación. No se reintentan ni bloquean otros chats.
+- Se conservan las esperas de respuesta: nunca se envía sobre una generación activa.
+- Sin pestañas nuevas, navegación automática, permisos nuevos ni cambios de identidad.
+
+Verificado con 212 pruebas Node (25 regresiones nuevas), incluida la ejecución del
+coordinador después del reinicio sin pulsar Play: espera al terminar la respuesta,
+envía una sola vez y conserva el borrador. Pruebas de almacenamiento y navegador
+simuladas; no se ha reproducido el ciclo completo en una sesión real de ChatGPT.
+Los límites existentes del transporte en segundo plano no cambian.
+
 ## v0.6.4: decorated web links are not attachments
 
 Fixes a false rejection of literal HTTP(S) links decorated with noneditable

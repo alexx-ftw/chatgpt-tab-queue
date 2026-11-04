@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {newState,addJob,markPreparing,markSubmitting} from '../core/model.mjs';
+import {newState,addJob,markPreparing,markSubmitting,recoverAfterRestart,migrateState} from '../core/model.mjs';
 import {createCoordinator} from '../core/coordinator.mjs';
 const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222';
 export function fixture(){
@@ -126,4 +126,41 @@ test('slow cleanup in one conversation does not stop another conversation',async
  let release;const stalled=new Promise(r=>release=r);f.io.sendTab=async(_id,m)=>{if(m.type==='CANCEL_UPLOAD')await stalled;return {ok:true};};
  const removing=f.c.remove(j.id);for(let n=0;n<30;n++)await Promise.resolve();f.add(B,'continues');await steps(f,24);
  const remaining=f.s.jobs.filter(x=>x.conversationId===B).length;release();await removing;assert.equal(remaining,0);
+});
+
+// Automatic-start regressions: no play click or synthetic resume is used.
+test('queued follow-up survives browser restart, waits for busy chat and then sends once',async()=>{
+ const f=fixture();f.add(A,'after restart');f.pages.get(4).state='busy';
+ await f.store.changeState(recoverAfterRestart);await steps(f,12);assert.equal(f.s.paused,false);assert.equal(f.s.jobs.length,1);
+ assert.equal(f.calls.filter(x=>x[0]==='page'&&['send','localSend'].includes(x[2])).length,0);
+ f.pages.get(4).state='idle';f.pages.get(4).finalId='finished';await steps(f,24);
+ assert.equal(f.s.jobs.length,0);assert.equal(f.calls.filter(x=>x[0]==='page'&&['send','localSend'].includes(x[2])).length,1);
+ assert.equal(f.pages.get(4).text,'Estoy escribiendo otro borrador');
+ assert.ok(!f.calls.some(x=>['create','navigate'].includes(x[0])));
+});
+test('new batch sends without play after a waiting-only browser restart',async()=>{
+ const f=fixture();f.add(A,'first');await steps(f);assert.equal(f.s.jobs.length,0);
+ await f.store.changeState(recoverAfterRestart);f.add(A,'next');
+ f.pages.get(4).state='idle';f.pages.get(4).finalId='finished-first';await steps(f,24);
+ assert.equal(f.s.paused,false);assert.equal(f.s.jobs.length,0);
+ assert.equal(f.calls.filter(x=>x[0]==='page'&&['send','localSend'].includes(x[2])).length,2);
+});
+test('restart with one possibly sent message does not block or duplicate another conversation',async()=>{
+ const f=fixture(),j=f.add(A,'possibly sent');f.add(B,'safe pending');
+ await f.store.changeState(s=>{markPreparing(s,j.id,4,{lastUser:{id:'old'}},1);markSubmitting(s,j.id,2);recoverAfterRestart(s);});
+ await steps(f,26);assert.equal(f.s.jobs.length,1);assert.equal(f.s.jobs[0].status,'uncertain');
+ assert.equal(f.s.conversations[A].paused,true);assert.equal(f.s.conversations[B].paused,false);
+ const sends=f.calls.filter(x=>x[0]==='page'&&['send','localSend'].includes(x[2]));
+ assert.equal(sends.length,1);assert.equal(sends[0][1],8);
+});
+test('explicit pause persists through startup and additional Tab captures',async()=>{
+ const f=fixture();f.add();await f.c.pause();await f.store.changeState(recoverAfterRestart);f.add(B,'new while paused');
+ await steps(f,20);assert.equal(f.s.jobs.length,2);assert.equal(f.s.reason,'Pausa manual');
+ assert.ok(!f.calls.some(x=>x[0]==='page'&&['send','localSend'].includes(x[2])));
+ await f.c.resume();await steps(f,24);assert.equal(f.s.jobs.length,0);
+});
+test('update migration repairs legacy automatic pause before coordinator dispatch',async()=>{
+ const f=fixture();f.add();await f.store.changeState(s=>{s.paused=true;s.reason='Colas recuperadas tras reiniciar el navegador. Revisa y pulsa Reanudar.';migrateState(s);});
+ await steps(f,24);assert.equal(f.s.jobs.length,0);
+ assert.equal(f.calls.filter(x=>x[0]==='page'&&['send','localSend'].includes(x[2])).length,1);
 });

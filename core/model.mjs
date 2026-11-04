@@ -25,6 +25,14 @@ export function migrateState(s) {
   if(!s.helpers||typeof s.helpers!=='object')s.helpers={};
   s.helper=null;
   if(String(s.reason||'').startsWith('Esperando al navegador:'))s.reason='';
+  // Old releases persisted an unconditional global pause on browser startup,
+  // even when only a previously sent response was running. Remove that exact
+  // automatic pause, never a manual/import/unknown pause. Unsafe jobs are
+  // isolated per conversation before safe queued work becomes runnable again.
+  if(s.paused && s.reason===LEGACY_RESTART_PAUSE){
+    isolateInterruptedJobs(s);
+    s.paused=false;s.reason='';
+  }
   s.version=4;
   return s;
 }
@@ -91,13 +99,25 @@ export function reconcileWait(s,id,snap,now=Date.now()) {
   }
   return false;
 }
-export function recoverAfterRestart(s) {
-  if(!s.jobs.length&&!Object.values(s.conversations).some(c=>c.waiting))return;
-  s.paused=true;s.reason='Colas recuperadas tras reiniciar el navegador. Revisa y pulsa Reanudar.';
-  for(const j of s.jobs) {
+const LEGACY_RESTART_PAUSE='Colas recuperadas tras reiniciar el navegador. Revisa y pulsa Reanudar.';
+/** A restart is not a user pause. Only interrupted or unconfirmed work needs
+ * review; other conversations keep their previous running/paused state. */
+function isolateInterruptedJobs(s){
+  for(const j of s.jobs||[]){
     if(j.status==='submitting'){j.status='uncertain';j.reason='El navegador se cerró durante un posible envío. No se reintentará solo.';}
     else if(j.status==='preparing'){j.status='error';j.reason='La preparación quedó interrumpida. El mensaje sigue guardado.';}
+    if(['held','error','uncertain'].includes(j.status)){
+      const c=s.conversations?.[j.conversationId];
+      // Preserve explicit pause reasons. Status gates and original attempts are
+      // retained, so restarting cannot retry an unconfirmed send or clear a draft.
+      if(c&&!c.paused){c.paused=true;c.reason=j.reason||'Pendiente recuperado para revisión. Comprueba el borrador y el historial antes de continuar.';}
+    }
   }
+}
+export function recoverAfterRestart(s) {
+  migrateState(s);
+  isolateInterruptedJobs(s);
+  // Destinations/leases belong to the previous browser session, not the queue.
   s.helper=null;s.helpers={};
 }
 
