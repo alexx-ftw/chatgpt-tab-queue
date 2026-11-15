@@ -126,13 +126,36 @@ globalThis.CQPage = function CQPage(args) {
     }
     return inlineContextCache={links,unsupported};
   }
+  // List markers are structure, not text nodes. Preserve their ordinal values
+  // in queued text, draft comparisons and receipts without mutating the editor.
+  function listItemPrefix(node){
+    const list=node.parentElement,tag=String(list?.tagName).toUpperCase();
+    if(tag==='UL')return '- ';
+    if(tag!=='OL')return '';
+    const items=[...list.children].filter(n=>String(n.tagName).toUpperCase()==='LI');
+    const integer=value=>value!==null&&/^[+-]?\d+$/.test(value)&&Number.isSafeInteger(Number(value))?Number(value):null;
+    const step=list.hasAttribute('reversed')?-1:1;
+    let ordinal=integer(list.getAttribute('start'))??(step<0?items.length:1);
+    for(const item of items){
+      ordinal=integer(item.getAttribute('value'))??ordinal;
+      if(item===node)return String(ordinal)+'. ';
+      ordinal+=step;
+    }
+    return '';
+  }
+  function withListMarker(node,value){
+    if(!value.trim())return value; // Empty list placeholders keep native Tab.
+    const prefix=listItemPrefix(node);
+    return prefix+value.replace(/\n/g,'\n'+' '.repeat(prefix.length));
+  }
   function textOf(e){
     if(!e)return '';
     if(e.tagName==='TEXTAREA')return e.value;
     const links=e===editor?inlineContexts().links:new Map();
+    const preserveLists=e===editor&&!!e.querySelector('ol,ul');
     // ProseMirror textBetween can omit atomic link labels. Read certified URL
     // nodes from the DOM, retaining the native document separately in capture().
-    if(e===editor&&!links.size){const v=pmView();if(v)return v.state.doc.textBetween(0,v.state.doc.content.size,'\n','\n');}
+    if(e===editor&&!links.size&&!preserveLists){const v=pmView();if(v)return v.state.doc.textBetween(0,v.state.doc.content.size,'\n','\n');}
     function walk(n){
       if(n.nodeType===3)return n.nodeValue;
       if(n.nodeType!==1)return '';
@@ -146,7 +169,8 @@ globalThis.CQPage = function CQPage(args) {
         return '\n';
       }
       const a=[...n.childNodes],blocks=/^(P|DIV|H[1-6]|LI|PRE|BLOCKQUOTE|UL|OL|TR)$/;
-      return a.map((x,i)=>walk(x)+(a[i+1]&&((x.nodeType===1&&blocks.test(x.tagName))||(a[i+1].nodeType===1&&blocks.test(a[i+1].tagName)))?'\n':'')).join('');
+      const value=a.map((x,i)=>walk(x)+(a[i+1]&&((x.nodeType===1&&blocks.test(x.tagName))||(a[i+1].nodeType===1&&blocks.test(a[i+1].tagName)))?'\n':'')).join('');
+      return preserveLists&&String(n.tagName).toUpperCase()==='LI'?withListMarker(n,value):value;
     }
     return walk(e);
   }
@@ -158,7 +182,14 @@ globalThis.CQPage = function CQPage(args) {
       const removers=[...card.querySelectorAll('button,[role="button"]')].filter(b=>REMOVE.test(label(b)));
       if(removers.length!==1||removers[0]!==remove)break;
       const previews=[...card.querySelectorAll('[class*="whitespace-pre-wrap"]')];
-      const opener=[...card.querySelectorAll('button')].some(b=>/^(selection|selección|texto seleccionado)$/i.test(label(b)));
+      const removeIndex=label(remove).match(/\s+([1-9]\d*)$/)?.[1];
+      const openers=[...card.querySelectorAll('button')].filter(b=>{
+        const match=label(b).match(/^(selection|selección|texto seleccionado)(?:\s+([1-9]\d*))?$/i);
+        // Legacy cards omit the suffix. Numbered cards must identify the same
+        // selection as their native remove control, never an adjacent card.
+        return !!match&&(!match[2]||match[2]===removeIndex);
+      });
+      const opener=openers.length===1;
       if(!previews.length||!opener)continue;
       if(previews.length!==1)return null;
       const preview=previews[0],nodes=[card,...card.querySelectorAll('*')];
@@ -245,7 +276,7 @@ globalThis.CQPage = function CQPage(args) {
   // markers; matching never strips punctuation or accepts a substring.
   const RECEIPT_TEXT='[data-message-text],[data-message-content],.whitespace-pre-wrap,[data-search-result-target],.markdown';
   const receiptExcluded=n=>n?.nodeType===1&&(n.matches('button,[role="button"],svg,script,style,input,textarea,form,[hidden],[aria-hidden="true"],[inert],[data-markdown-copy="exclude"],[data-file-name],[data-composer-attachments]')||getComputedStyle(n).display==='none'||getComputedStyle(n).visibility==='hidden');
-  function receiptText(node,markdown=false){
+  function receiptText(node,markdown=false,preserveLists=false){
     if(node.nodeType===3)return node.nodeValue;
     if(node.nodeType!==1||receiptExcluded(node))return '';
     const tag=String(node.tagName).toUpperCase();
@@ -253,8 +284,8 @@ globalThis.CQPage = function CQPage(args) {
     if(tag==='BR')return '\n';
     const children=[...node.childNodes];
     const block=n=>n?.nodeType===1&&/^(P|DIV|H[1-6]|BLOCKQUOTE|UL|OL|LI|PRE|TABLE|TR|SECTION)$/.test(String(n.tagName).toUpperCase());
-    const value=children.map((n,i)=>receiptText(n,markdown)+(children[i+1]&&(block(n)||block(children[i+1]))?(markdown?'\n\n':'\n'):'')).join('');
-    if(!markdown)return value;
+    const value=children.map((n,i)=>receiptText(n,markdown,preserveLists)+(children[i+1]&&(block(n)||block(children[i+1]))?(markdown?'\n\n':'\n'):'')).join('');
+    if(!markdown)return preserveLists&&tag==='LI'?withListMarker(node,value):value;
     if(/^H[1-6]$/.test(tag))return '#'.repeat(Number(tag.slice(1)))+' '+clean(value);
     if(tag==='BLOCKQUOTE')return clean(value).split('\n').map(line=>'> '+line).join('\n');
     if(tag==='STRONG'||tag==='B')return '**'+value+'**';
@@ -270,10 +301,7 @@ globalThis.CQPage = function CQPage(args) {
       return '```'+language+'\n'+value.replace(/\n$/,'')+'\n```';
     }
     if(tag==='LI'){
-      const ordered=String(node.parentElement?.tagName).toUpperCase()==='OL';
-      const start=Number(node.parentElement?.getAttribute('start')||1);
-      const index=ordered?[...node.parentElement.children].indexOf(node):0;
-      return (ordered?String(start+index)+'. ':'- ')+clean(value);
+      return withListMarker(node,clean(value));
     }
     return value;
   }
@@ -284,7 +312,10 @@ globalThis.CQPage = function CQPage(args) {
     if(!roots.length)roots.push(e);
     const text=clean(roots.map(n=>receiptText(n)).join('\n'));
     const markdown=clean(roots.map(n=>receiptText(n,true)).join('\n\n'));
-    const textCandidates=[...new Set([text,markdown])];
+    // Native rich lists may have bold/link marks even though text capture is
+    // plain. Keep list markers in that candidate rather than dropping numbers.
+    const listText=clean(roots.map(n=>receiptText(n,false,true)).join('\n'));
+    const textCandidates=[...new Set([text,markdown,listText])];
     const files=[];
     const inText=x=>roots.some(r=>r!==e&&r.contains(x));
     const candidates=[...e.querySelectorAll('[data-file-name],[title],[download],[aria-label]')].filter(x=>!inText(x));

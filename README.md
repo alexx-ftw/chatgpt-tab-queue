@@ -42,6 +42,36 @@ v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
 Transfer files contain private data: never upload them to this repository.
 The transfer screen currently caps total attachment data at 256 MiB.
 
+## v0.6.8: selecciones numeradas y respuestas en lista
+
+Corrige el rechazo de tarjetas nativas con etiquetas «Selection 1», «Selection 2»
+y sus equivalentes en español. El detector anterior solo aceptaba «Selection»
+sin sufijo. Cada etiqueta numerada se comprueba contra el botón de retirada de
+su propia tarjeta; no se confunden selecciones, archivos ni referencias opacas.
+
+- Conserva las selecciones en orden, incluso si las etiquetas se renumeran o
+  la última vuelve al formato antiguo durante la retirada nativa.
+- Conserva los números y viñetas de la respuesta, incluidos inicio, valores
+  individuales, orden inverso y listas anidadas. El documento nativo se conserva
+  cuando está disponible; las selecciones siguen transportándose como citas.
+- Verifica también las listas del mensaje enviado, sin confundir una numeración
+  distinta ni dejar de confirmar por los estilos de texto del editor.
+- Si cambia la numeración durante el guardado, el borrador modificado se conserva.
+  Una lista vacía no se convierte en un mensaje compuesto solo por un marcador.
+
+No cambian coordinador, base de datos, pausas, permisos, identidad firmada ni
+canal de actualizaciones. No se abren pestañas ni se reenvían mensajes inciertos.
+No se recrean los chips o anclajes internos de selección ni se habilita transporte
+universal de referencias opacas.
+
+Verificación local: 288 pruebas Node y 79 comprobaciones de navegador
+(71 en Chromium y 8 en Camoufox). Incluye 24 regresiones unitarias nuevas,
+7 nuevos casos de selección y una reproducción con el fragmento del compositor
+aportado por el usuario, mantenido fuera del repositorio. Se comprobaron Tab,
+retirada nativa, bytes de archivos, envío único, confirmación y borrador siguiente.
+Son perfiles aislados con solicitudes interceptadas y mensajería simulada;
+no es una prueba dentro de una cuenta real de ChatGPT.
+
 ## v0.6.7: confirmar los mensajes ya enviados sin repetirlos
 
 Corrige fallos reproducidos en la lectura de la confirmación: solo se leía el
