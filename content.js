@@ -70,7 +70,7 @@
    `;
    const panel=element('section',undefined,'panel');panel.setAttribute('aria-label','Mensajes en cola');
    const bar=element('div',undefined,'bar');statusNode=element('span','','status');statusNode.setAttribute('role','status');statusNode.setAttribute('aria-live','polite');statusNode.setAttribute('aria-atomic','true');
-   pauseButton=iconButton('Pausar esta cola',async()=>{const current=state.aliases[target().id]||target().id;await rpc(state.paused?'RESUME':state.conversations[current]?.paused?'RESUME':'PAUSE',{conversationId:state.paused?null:current});await refresh();},'pause');
+   pauseButton=iconButton('Pausar esta cola',async()=>{const current=state.aliases[target().id]||target().id;const action=V.pauseAction(state.conversations[current],state.paused,true);await rpc(action.type,{conversationId:action.global?null:current});await refresh();},'pause');
    clearButton=iconButton('Vaciar toda la cola',async()=>{
     const n=state?.jobs.length||0;if(!n)return;
     if(confirm(`¿Vaciar toda la cola? Se eliminarán ${n} pendientes de todas las conversaciones y sus archivos locales. No se detiene la respuesta en curso.`)){await rpc('CLEAR_ALL');for(const d of uiDrafts.values())d.clear();jobList?.discardEdits();await refresh();}
@@ -93,7 +93,8 @@
   if(!document.body||!mount(cid))return;
   const V=globalThis.CQView,paused=state.paused||c?.paused;
   V.text(statusNode,jobs.length?`${jobs.length} en cola · ${V.queueStatus(c,jobs,{paused:state.paused,busy:snap.state==='busy'})}`:'Edición sin guardar');
-  pauseButton.title=state.paused?'Reanudar todas las colas':paused?'Reanudar esta cola':'Pausar esta cola';pauseButton.setAttribute('aria-label',pauseButton.title);setIcon(pauseButton,paused?'play':'pause');
+  const pause=V.pauseAction(c,state.paused,true);
+  pauseButton.title=pause.label;pauseButton.setAttribute('aria-label',pause.label);setIcon(pauseButton,pause.icon);pauseButton.disabled=false;
   clearButton.disabled=saving||!state.jobs.length;
   jobList.update(jobs,{paused});
   const reason=String(c?.reason||'');V.text(noticeNode,reason.startsWith('Esperando al navegador:')?'Reconectando con el chat. Los mensajes siguen guardados.':reason);noticeNode.title=reason;noticeNode.hidden=!reason;

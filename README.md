@@ -42,6 +42,56 @@ v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
 Transfer files contain private data: never upload them to this repository.
 The transfer screen currently caps total attachment data at 256 MiB.
 
+## v0.6.9 (preparada): edición con pausa temporal
+
+**Estado de distribución:** corrección preparada en código; el paquete firmado
+y su actualización automática aún no se han publicado. El canal estable sigue
+en 0.6.8.
+
+Editar un pendiente ya no crea una pausa manual permanente. La conversación se
+reserva mientras se edita; al guardar o cancelar, vuelve a su estado anterior.
+
+- Una cola activa continúa automáticamente, sin pulsar Play. Si ChatGPT sigue
+  respondiendo, espera normalmente antes del siguiente envío.
+- Conserva las pausas manuales previas, globales y añadidas durante la edición.
+  Guardar un error o un borrador retenido no lo reintenta.
+- Varias ediciones abiertas mantienen ese chat detenido hasta cerrar la última.
+  Las otras conversaciones pueden continuar independientemente.
+- Guardado atómico y reservas por edición: los cambios simultáneos no se pisan.
+  Si falla el guardado, conserva el texto editado y no libera la cola.
+- Guardar sin cambiar el texto conserva el documento nativo. Se mantienen los
+  adjuntos, el orden y los atajos Ctrl/Cmd+Enter y Escape.
+- La interfaz muestra «Editando» y vuelve al estado normal al terminar. Cerrar
+  normalmente la vista cancela sus reservas; un reinicio completo durante una
+  edición interrumpida mantiene ese chat pausado para revisión.
+- Una confirmación tardía no puede saltarse una edición abierta.
+- Las vistas de extensión tienen propietarios por documento; si se cierran sin
+  entregar el evento de salida, se liberan sus reservas sin borrar mensajes.
+  La limpieza de navegación se serializa con el inicio de la edición.
+- Una respuesta perdida después de guardar se recupera con el mismo token sin
+  guardar dos veces; la confirmación se conserva hasta que la vista la reconoce.
+- Durante la edición se puede elegir mantener la pausa o reanudar al terminar.
+  El estado «Editando» también aparece al editar un pendiente retenido o con error.
+- El auto-update espera a que terminen las reservas persistentes de edición.
+  Una actualización forzada deja la edición interrumpida para revisión, sin
+  conservar un bloqueo de editor inexistente.
+
+**Pausas antiguas:** hasta 0.6.8, editar se registraba como «Pausa manual», sin
+indicar su origen. No se borran esas pausas al actualizar: puede ser necesario
+pulsar Play una vez para quitar la ya existente. Las nuevas ediciones recuperan
+su estado automáticamente al guardar o cancelar.
+
+Se conservan la identidad pública, los permisos, la base de datos y el canal nativo
+de auto-update; la firma del nuevo paquete sigue pendiente. No se abren
+pestañas, no se cambia el chat visible ni se vacía o reenvía la cola al actualizar.
+
+Verificación local: 328 pruebas Node y 136 comprobaciones de navegador (99 en
+Chromium y 37 en Camoufox). Incluye 38 regresiones de edición y 29 casos de interfaz
+repetidos en ambos motores, pausas manuales, concurrencia, fallos de guardado y
+un envío único después de guardar. Perfiles aislados, solicitudes interceptadas,
+almacenamiento en memoria y comunicación de extensión simulada; no es una
+validación dentro de una cuenta real de ChatGPT ni del ciclo real de auto-update.
+
 ## v0.6.8: selecciones numeradas y respuestas en lista
 
 Corrige el rechazo de tarjetas nativas con etiquetas «Selection 1», «Selection 2»

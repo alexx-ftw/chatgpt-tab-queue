@@ -9,7 +9,8 @@ export function createNativeUpdates({runtime,getState,isBusy=()=>false,now=()=>D
       const state=await getState();
       const critical=state.jobs.some(j=>['preparing','submitting'].includes(j.status)||
         (j.status==='held'&&now()-(j.createdAt??now())<15000));
-      if(critical||isBusy())return false;
+      const editing=Object.values(state.conversations||{}).some(c=>c.editPause?.sessions?.length);
+      if(critical||editing||isBusy())return false;
       applying=true;
       try{await runtime.reload();return true;}catch(e){applying=false;throw e;}
     }

@@ -1,3 +1,4 @@
+import {interruptQueueEdits} from './editing.mjs';
 import {openDB,getState} from './db.mjs';
 import {targetFromURL,migrateState} from './model.mjs';
 const LIMIT=256*1024*1024;
@@ -32,7 +33,7 @@ export function validateBackup(data){
   const bytes=Uint8Array.from(atob(p.data),c=>c.charCodeAt(0)).buffer;parts.push({fileId:p.fileId,index:p.index,bytes});sums.set(p.fileId,sums.get(p.fileId)+bytes.byteLength);next.set(p.fileId,p.index+1);
  }
  for(const j of s.jobs)for(const f of j.files){if(!files.has(f.id)||files.get(f.id).size!==f.size||sums.get(f.id)!==f.size||files.get(f.id).name!==f.name)throw Error('Falta un archivo completo de la cola.');}
- migrateState(s);for(const j of s.jobs){if(j.status==='submitting'){j.status='uncertain';j.reason='Posible envío anterior a la transferencia. Comprueba el historial.';}else if(j.status==='preparing'){j.status='error';j.reason='Preparación interrumpida. El borrador se conserva.';s.conversations[j.conversationId].paused=true;}}s.paused=true;s.reason='Cola importada. Revisa los pendientes y pulsa Reanudar.';s.helpers={};s.helper=null;s.revision=(Number(s.revision)||0)+1;
+ migrateState(s);interruptQueueEdits(s);for(const j of s.jobs){if(j.status==='submitting'){j.status='uncertain';j.reason='Posible envío anterior a la transferencia. Comprueba el historial.';}else if(j.status==='preparing'){j.status='error';j.reason='Preparación interrumpida. El borrador se conserva.';s.conversations[j.conversationId].paused=true;}}s.paused=true;s.reason='Cola importada. Revisa los pendientes y pulsa Reanudar.';s.helpers={};s.helper=null;s.revision=(Number(s.revision)||0)+1;
  for(const j of s.jobs)if(s.conversations[j.conversationId].isNew){j.status='held';j.reason='Este chat nuevo no tenía URL. Recupera el mensaje desde la vista de cola.';j.sourceTabId=null;}
  return {state:s,files:[...files.values()],parts};
 }

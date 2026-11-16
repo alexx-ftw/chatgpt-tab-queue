@@ -1,3 +1,4 @@
+import {uiEditOwner} from './core/editing.mjs';
 import './core/adapter.js';
 import './core/frame-page.js';
 import {createSurfaceIO,surfaceForSender} from './core/surfaces.mjs';
@@ -15,7 +16,7 @@ const surfaces=createSurfaceIO({api:chrome,page:topPage,frameFunc:globalThis.CQF
 const {page,listTabs}=surfaces;
 async function publicState(tabId){
  const s=await store.getState(),helpers=s.helpers||{};
- return {...s,jobs:s.jobs.map(({doc,attempt,...j})=>({...j,text:j.text.slice(0,40000),truncated:j.text.length>40000,attempt:attempt?{stage:attempt.stage}:null})),
+ return {...s,conversations:Object.fromEntries(Object.entries(s.conversations).map(([id,{editPause,editReceipts,...c}])=>[id,{...c,editing:editPause?.sessions.length||0,editResume:editPause?editPause.resume!==false:null}])),jobs:s.jobs.map(({doc,attempt,...j})=>({...j,text:j.text.slice(0,40000),truncated:j.text.length>40000,attempt:attempt?{stage:attempt.stage}:null})),
    helpers:Object.fromEntries(Object.entries(helpers).map(([cid,h])=>[cid,{tabId:h.tabId,conversationId:cid}])),helper:null,
    draftBackups:Object.fromEntries(Object.entries(s.draftBackups||{}).map(([token,d])=>[token,{token,conversationId:d.conversationId,createdAt:d.createdAt,active:s.jobs.some(j=>j.attempt?.token===token&&['preparing','submitting'].includes(j.status))}])),
    isHelper:false};
@@ -37,7 +38,7 @@ async function boot(){
   await chrome.alarms.create('cq-check',{periodInMinutes:0.5});
  })();return bootPromise;
 }
-function schedule(){if(timer)return;timer=setTimeout(async()=>{timer=null;try{await boot();await coordinator.tick();await updates.applyWhenSafe();}catch(e){console.warn('[ChatGPT Queue]',e.message);}},80);}
+function schedule(){if(timer)return;timer=setTimeout(async()=>{timer=null;try{await boot();await coordinator.reconcileUIEdits(chrome.runtime);await coordinator.tick();await updates.applyWhenSafe();}catch(e){console.warn('[ChatGPT Queue]',e.message);}},80);}
 function senderInfo(sender){
  if(sender.id!==chrome.runtime.id)throw Error('Remitente no autorizado.');
  const own=String(sender.url||'').startsWith(chrome.runtime.getURL(''));
@@ -112,7 +113,17 @@ async function handle(m,sender){
   case 'PAUSE':return coordinator.pause(m.conversationId||null);
   case 'RESUME':await coordinator.resume(m.conversationId||null);schedule();return true;
   case 'RETRY':await coordinator.retry(m.id);schedule();return true;
-  case 'EDIT':return coordinator.change(s=>{const j=s.jobs.find(j=>j.id===m.id);if(!j||!['queued','held','error'].includes(j.status))throw Error('Ese mensaje ya se está enviando.');if(typeof m.text!=='string'||m.text.length>2000000||(!m.text.trim()&&!j.files.length))throw Error('Texto inválido.');j.text=m.text;j.doc=null;});
+  case 'EDIT_BEGIN':{
+   const owner=who.ui?uiEditOwner(sender):who.owner;
+   if(who.ui){
+    const contexts=await chrome.runtime.getContexts({documentIds:[sender.documentId]});
+    if(!contexts.some(c=>c.documentId===sender.documentId))throw Error('La vista de edición ya se ha cerrado.');
+   }
+   return coordinator.beginEdit({id:m.id,token:m.token,owner});
+  }
+  case 'EDIT_ACK':return coordinator.ackEdit({id:m.id,token:m.token,owner:who.ui?uiEditOwner(sender):who.owner});
+  case 'EDIT_END':{const result=await coordinator.endEdit({id:m.id,token:m.token,owner:who.ui?uiEditOwner(sender):who.owner,save:m.save===true,base:m.base,text:m.text});schedule();return result;}
+  case 'EDIT':return coordinator.change(s=>{const j=s.jobs.find(j=>j.id===m.id);if(!j||!['queued','held','error'].includes(j.status))throw Error('Ese mensaje ya se está enviando.');if(typeof m.text!=='string'||m.text.length>2000000||(!m.text.trim()&&!j.files.length))throw Error('Texto inválido.');j.text=m.text;j.doc=null;j.editRevision=(j.editRevision||0)+1;});
   case 'SETTINGS':return coordinator.change(s=>{if(typeof m.preserveModel==='boolean')s.settings.preserveModel=m.preserveModel;});
   case 'OPEN_MANAGER':await chrome.tabs.create({url:chrome.runtime.getURL('ui/manager.html')});return true;
   case 'OPEN_CHAT':{const s=await store.getState(),id=s.aliases[m.conversationId]||m.conversationId,c=s.conversations[id];if(!c)throw Error('Conversación no encontrada.');await chrome.tabs.create({url:c.url});return true;}
@@ -134,8 +145,8 @@ chrome.runtime.onInstalled.addListener(details=>{
  (async()=>{await boot();if(details.reason==='update')await store.changeState(recoverAfterUpdate);await store.cleanOrphans();await reattachPages(chrome);await changed();schedule();})().catch(console.error);
 });
 chrome.runtime.onUpdateAvailable.addListener(details=>{updates.available(details);schedule();});
-chrome.tabs.onRemoved.addListener(id=>{reports.delete(id);schedule();});
-chrome.tabs.onUpdated.addListener((_id,info)=>{if(info.status==='complete'||info.frozen===false){reattachPages(chrome,_id).catch(()=>{});schedule();}});
+chrome.tabs.onRemoved.addListener(id=>{reports.delete(id);coordinator.abandonTabEdits(id).then(schedule).catch(console.error);});
+chrome.tabs.onUpdated.addListener((_id,info)=>{if(info.status==='loading')coordinator.abandonTabEdits(_id).then(schedule).catch(console.error);if(info.status==='complete'||info.frozen===false){reattachPages(chrome,_id).catch(()=>{});schedule();}});
 chrome.action.onClicked.addListener(()=>chrome.tabs.create({url:chrome.runtime.getURL('ui/manager.html')}));
 // Fast while a worker is awake; alarms and content events recover after worker suspension.
 setInterval(schedule,1000);

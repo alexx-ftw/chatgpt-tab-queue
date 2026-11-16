@@ -22,3 +22,8 @@ test('reattachment uses existing tabs only, immediate injection and packaged scr
  const api={runtime:{getManifest:()=>({content_scripts:[{js:['core/adapter.js','content.js']}]})},tabs:{query:async()=>[{id:1,url:'https://chatgpt.com/c/a'},{id:2,url:'https://chatgpt.com/c/b',discarded:true}]},scripting:{executeScript:async a=>{calls.push(a);return []}}};
  await m.reattachPages(api);assert.equal(calls.length,1);assert.equal(calls[0].target.tabId,1);assert.equal(calls[0].injectImmediately,true);assert.deepEqual(calls[0].files,['core/adapter.js','content.js']);
 });
+test('automatic package reload waits for durable edits even after activity heartbeat expires',async()=>{
+ const m=await load(),state=newState();state.conversations.chat={editPause:{sessions:[{token:'test-token'}]}};let reloads=0;
+ const u=m.createNativeUpdates({runtime:{reload:()=>reloads++},getState:async()=>state,isBusy:()=>false});u.available({version:'0.7.0'});
+ assert.equal(await u.applyWhenSafe(),false);assert.equal(reloads,0);state.conversations.chat.editPause.sessions=[];assert.equal(await u.applyWhenSafe(),true);assert.equal(reloads,1);
+});
