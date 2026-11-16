@@ -1,3 +1,4 @@
+import {beginQueueEdit,endQueueEdit,hasEdits,retainPause,abandonTabEdits} from './editing.mjs';
 import {canonical,addJob,markPreparing,markSubmitting,acknowledge,confirmedReceipt,ACK_TIMEOUT_REASON,reconcileWait,clearQueue,targetFromURL,migrateState} from './model.mjs';
 
 /** Durable per-conversation lanes; browser waits in A never block B. io is the only browser dependency (also used by tests). */
@@ -13,7 +14,7 @@ export function createCoordinator({store,io}) {
   const find=(s,id)=>s.jobs.find(j=>j.id===id);
   async function live(id,status=null){const s=await store.getState(),j=find(s,id);return j&&(!status||j.status===status)&&!s.paused&&!s.conversations[j.conversationId]?.paused?j:null;}
   async function fail(id,reason,uncertain=false){
-    const {result:j}=await change(s=>{const x=find(s,id);if(!x)return null;x.status=uncertain?'uncertain':'error';x.reason=String(reason).slice(0,600);const c=s.conversations[x.conversationId];c.paused=true;c.reason=x.reason;return x;});
+    const {result:j}=await change(s=>{const x=find(s,id);if(!x)return null;x.status=uncertain?'uncertain':'error';x.reason=String(reason).slice(0,600);const c=s.conversations[x.conversationId];retainPause(c);c.paused=true;c.reason=x.reason;return x;});
     if(j){
       if(j.attempt)try{await io.sendTab(j.attempt.tabId,{channel:'cq2',type:'CANCEL_UPLOAD',token:j.attempt.token});}catch{}
       await endGuards(j);
@@ -67,13 +68,13 @@ export function createCoordinator({store,io}) {
     const state=await store.getState(),scope=find(state,id)?.conversationId;if(!scope)return false;
     enterMaintenance(scope);try{
     const {result:j}=await change(s=>{const index=s.jobs.findIndex(j=>j.id===id);if(index<0)return null;const j=s.jobs[index];s.jobs.splice(index,1);s.cancelEpoch=(s.cancelEpoch||0)+1;
-      if(['submitting','uncertain'].includes(j.status)){s.conversations[j.conversationId].paused=true;s.conversations[j.conversationId].reason='Se retiró un posible envío. Revisa antes de reanudar.';}
+      if(['submitting','uncertain'].includes(j.status)){retainPause(s.conversations[j.conversationId]);s.conversations[j.conversationId].paused=true;s.conversations[j.conversationId].reason='Se retiró un posible envío. Revisa antes de reanudar.';}
       for(const h of Object.values(s.helpers||{}))if(h.jobId===j.id)h.jobId=null;return j;});
     if(j){await tidy(j);await deleteUnreferenced([j]);}return !!j;
     }finally{leaveMaintenance(scope);}
   }
   async function pause(conversationId=null){
-    const {result:preparing}=await change(s=>{const id=s.aliases[conversationId]||conversationId;if(id){const c=s.conversations[id];if(c){c.paused=true;c.reason='Pausa manual';}}else{s.paused=true;s.reason='Pausa manual';}
+    const {result:preparing}=await change(s=>{const id=s.aliases[conversationId]||conversationId;if(id){const c=s.conversations[id];if(c){retainPause(c);c.paused=true;c.reason='Pausa manual';}}else{s.paused=true;s.reason='Pausa manual';}
       return s.jobs.filter(j=>j.status==='preparing'&&(!id||j.conversationId===id));});
     for(const j of preparing){await tidy(j);await mutateAttempt(j.id,x=>{x.status='queued';x.attempt=null;});}
   }
@@ -81,6 +82,7 @@ export function createCoordinator({store,io}) {
     return change(s=>{const id=s.aliases[conversationId]||conversationId;
       if(!id){s.paused=false;s.reason='';}
       for(const c of Object.values(s.conversations))if(!id||c.id===id){
+        if(hasEdits(c))continue;
         if(s.jobs.some(j=>j.conversationId===c.id&&['submitting','uncertain','error','held'].includes(j.status)))continue;
         c.paused=false;c.reason='';c.nextCheckAt=0;
       }
@@ -89,8 +91,9 @@ export function createCoordinator({store,io}) {
   async function retry(id){
     const s=await store.getState(),j=find(s,id);
     if(!j||!['error','held'].includes(j.status))throw Error('Un envío incierto no se reintenta automáticamente. Comprueba el chat y retíralo.');
+    if(hasEdits(s.conversations[j.conversationId]))throw Error('Termina la edición antes de reintentar.');
     await tidy({...j,status:'preparing'});
-    return change(s=>{const x=find(s,id);if(!x||!['error','held'].includes(x.status))return;x.status='queued';x.reason='';x.attempt=null;
+    return change(s=>{const x=find(s,id);if(!x||!['error','held'].includes(x.status))return;if(hasEdits(s.conversations[x.conversationId]))throw Error('Termina la edición antes de reintentar.');x.status='queued';x.reason='';x.attempt=null;
       const c=s.conversations[x.conversationId];c.paused=false;c.reason='';c.nextCheckAt=0;});
   }
   async function uploadResult(id,token,error=null){
@@ -436,5 +439,8 @@ export function createCoordinator({store,io}) {
     }
     await Promise.all(work);
   }
-  return {tick,clear,remove,pause,resume,retry,uploadResult,change,emit};
+  return {tick,clear,remove,pause,resume,retry,uploadResult,change,emit,
+    abandonTabEdits:async tabId=>{const s=await store.getState();if(Object.values(s.conversations).some(c=>c.editPause?.sessions.some(x=>x.owner.startsWith(`tab:${tabId}:`))))return change(s=>abandonTabEdits(s,tabId));},
+    beginEdit:async p=>(await change(s=>beginQueueEdit(s,p))).result,
+    endEdit:async p=>(await change(s=>endQueueEdit(s,p))).result};
 }

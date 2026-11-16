@@ -1,3 +1,4 @@
+import {EDIT_REASON,hasEdits,retainPause,clearQueueEdits,interruptQueueEdits} from './editing.mjs';
 /** Pure queue transitions. All external side effects belong to background.mjs. */
 export const canonical = value => String(value ?? '').replace(/\r\n?/g,'\n').replace(/\u00a0/g,' ').trim();
 export const comparable = value => canonical(value).replace(/\s+/g,' ');
@@ -98,7 +99,8 @@ export function acknowledge(s,id,user,snapshot,now=Date.now()) {
   // manual/global/import/unknown pauses and other jobs requiring review.
   if(c.paused&&c.reason===ACK_TIMEOUT_REASON&&j.reason===ACK_TIMEOUT_REASON&&
      !s.jobs.some(x=>x.conversationId===cid&&['held','error','uncertain','submitting','preparing'].includes(x.status))){
-    c.paused=false;c.reason='';
+    if(hasEdits(c)){c.editPause.resume=true;c.reason=EDIT_REASON;}
+    else{c.paused=false;c.reason='';}
   }
   // History is metadata only; sent text and file bytes are not retained in history.
   s.history.unshift({id:j.id,conversationId:cid,sentAt:now,fileCount:j.files.length});s.history=s.history.slice(0,100);
@@ -133,6 +135,7 @@ function isolateInterruptedJobs(s){
 export function recoverAfterRestart(s) {
   migrateState(s);
   isolateInterruptedJobs(s);
+  interruptQueueEdits(s);
   // Destinations/leases belong to the previous browser session, not the queue.
   s.helper=null;s.helpers={};
 }
@@ -143,9 +146,10 @@ export function clearQueue(s,conversationId=null){
   const removed=s.jobs.filter(j=>!cid||j.conversationId===cid);
   s.jobs=s.jobs.filter(j=>!removed.includes(j));s.cancelEpoch=(s.cancelEpoch||0)+1;
   for(const j of removed)if(['submitting','uncertain'].includes(j.status)){
-    const c=s.conversations[j.conversationId];c.paused=true;
+    const c=s.conversations[j.conversationId];retainPause(c);c.paused=true;
     c.reason='Cola vaciada durante un posible envío. Comprueba el chat antes de reanudar.';
   }
+  clearQueueEdits(s,cid);
   return removed;
 }
 

@@ -94,6 +94,8 @@
   const V=globalThis.CQView,paused=state.paused||c?.paused;
   V.text(statusNode,jobs.length?`${jobs.length} en cola · ${V.queueStatus(c,jobs,{paused:state.paused,busy:snap.state==='busy'})}`:'Edición sin guardar');
   pauseButton.title=state.paused?'Reanudar todas las colas':paused?'Reanudar esta cola':'Pausar esta cola';pauseButton.setAttribute('aria-label',pauseButton.title);setIcon(pauseButton,paused?'play':'pause');
+  pauseButton.disabled=!!c?.editing;
+  if(c?.editing)pauseButton.title='Guarda o cancela la edición para continuar';
   clearButton.disabled=saving||!state.jobs.length;
   jobList.update(jobs,{paused});
   const reason=String(c?.reason||'');V.text(noticeNode,reason.startsWith('Esperando al navegador:')?'Reconectando con el chat. Los mensajes siguen guardados.':reason);noticeNode.title=reason;noticeNode.hidden=!reason;

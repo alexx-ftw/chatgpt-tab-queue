@@ -1,4 +1,4 @@
-/* Queue manager UI. Uses existing RPC commands only; never sends or navigates a chat automatically. */
+/* Queue manager UI. Uses queue RPC commands only; never sends or navigates a chat automatically. */
 (() => {
   'use strict';
   const {rpc}=CQClient,V=CQView,$=id=>document.getElementById(id);
@@ -51,7 +51,7 @@
       V.text(v.title,c.title||'Conversación');
       const filtered=g.jobs.length!==g.all.length;
       V.text(v.sub,`${filtered?`${g.jobs.length} de ${g.all.length}`:g.all.length} pendiente${g.all.length===1?'':'s'} · ${V.queueStatus(c,g.all,{paused:state.paused})}`);
-      const paused=c.paused;const pauseLabel=paused?'Reanudar esta cola':'Pausar esta cola';v.pause.title=pauseLabel;v.pause.setAttribute('aria-label',pauseLabel);V.setIcon(v.pause,paused?'play':'pause');v.clear.disabled=!g.all.length;
+      const paused=c.paused;const pauseLabel=paused?'Reanudar esta cola':'Pausar esta cola';v.pause.title=pauseLabel;v.pause.setAttribute('aria-label',pauseLabel);V.setIcon(v.pause,paused?'play':'pause');v.pause.disabled=!!c.editing;if(c.editing)v.pause.title='Guarda o cancela la edición para continuar';v.clear.disabled=!g.all.length;
       V.text(v.note,c.reason||'');v.note.hidden=!c.reason;
       const positions=new Map(g.all.map((j,i)=>[j.id,i]));v.list.update(g.jobs,{paused:state.paused||c.paused,positions});nodes.push(v.node);
     }

@@ -1,6 +1,12 @@
 /* Shared presentation only. No sending, routing, storage migration or remote code. */
 (() => {
   'use strict';
+  // Keep edit leases across an extension reinjection, but cancel them when the
+  // document actually closes. SPA switches retain drafts and their reservations.
+  const previousEdits=globalThis.__CQEditLifecycle,editLeases=previousEdits?.leases||new Map();
+  if(previousEdits)window.removeEventListener('pagehide',previousEdits.hide);
+  const hide=event=>{if(!event.isTrusted||event.persisted)return;for(const close of editLeases.values())close().catch(()=>{});};
+  window.addEventListener('pagehide',hide);globalThis.__CQEditLifecycle={leases:editLeases,hide};
   const el = (tag, value, cls) => { const n = document.createElement(tag); if (value !== undefined) n.textContent = value; if (cls) n.className = cls; return n; };
   const text = (node, value) => { value = String(value ?? ''); if (node.textContent !== value) node.textContent = value; };
   const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -43,7 +49,9 @@
     if (jobs.some(j => ['error','held','uncertain'].includes(j.status))) return 'Requiere revisión';
     if (jobs.some(j => j.status === 'submitting')) return 'Confirmando envío';
     if (jobs.some(j => j.status === 'preparing')) return 'Preparando';
-    if (paused || c?.paused) return 'En pausa';
+    if (paused) return 'En pausa';
+    if (c?.editing) return 'Editando';
+    if (c?.paused) return 'En pausa';
     if (c?.waiting || busy) return 'Esperando respuesta';
     if (String(c?.reason || '').startsWith('Esperando al navegador:')) return 'Reconectando…';
     if (c?.reason) return 'Esperando';
@@ -99,38 +107,53 @@
       v.copy=act('Copiar texto',async()=>{const full=await fullJob(v.job.id);await navigator.clipboard.writeText(full.text);say('Texto copiado.');},'copy');
       v.edit=act('Editar pendiente',async()=>{
         if(drafts.has(v.job.id)||v.busy)return;v.busy=true;
+        const token=Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
+        let retained=false;
         try {
-          await rpc('PAUSE',{conversationId:v.job.conversationId});const full=await fullJob(v.job.id);
+          const reservation=await rpc('EDIT_BEGIN',{id:v.job.id,token}),full=reservation.job;
           if(!alive()||!node.isConnected)return;
           if(!['queued','error','held'].includes(full.status))throw Error('El mensaje ya se está enviando; no se ha modificado.');
-          drafts.set(v.job.id,{value:full.text,base:full.text,job:{...v.job,text:full.text}});beginEdit(v);onEditing(true);await refresh();
-        } finally {v.busy=false;}
+          drafts.set(v.job.id,{value:full.text,base:full.text,editToken:token,job:{...v.job,text:full.text}});retained=true;
+          beginEdit(v);onEditing(true);await refresh();
+        } finally {
+          v.busy=false;
+          if(!retained)await rpc('EDIT_END',{id:v.job.id,token,save:false}).catch(e=>notify(e.message));
+        }
       },'edit');
       v.retry=act('Reintentar pendiente',async()=>{if(confirm('Comprueba que no se haya enviado y revisa el borrador antes de reactivar este pendiente. ¿Continuar?')){await rpc('RETRY',{id:v.job.id});await refresh();}},'retry');
       v.remove=act('Retirar pendiente',async()=>{if(['submitting','uncertain'].includes(v.job.status)&&!confirm('Este mensaje puede haberse enviado ya. ¿Retirarlo solo de la cola, sin borrarlo de ChatGPT?'))return;await rpc('REMOVE',{id:v.job.id});await refresh();},'remove');
       actions.append(v.copy,v.edit,v.retry,v.remove);
       return v;
     }
-    function endEdit(v) {
-      drafts.delete(v.job.id);v.form?.remove();v.form=null;delete v.node.dataset.editing;v.read.hidden=false;v.actions.hidden=false;
-      onEditing(drafts.size>0);v.edit.focus({preventScroll:true});refresh();
+    function endEdit(v,d) {
+      if(d?.editToken)editLeases.delete(d.editToken);
+      if(drafts.get(v.job.id)===d)drafts.delete(v.job.id);v.form?.remove();v.form=null;delete v.node.dataset.editing;v.read.hidden=false;v.actions.hidden=false;
+      if(alive()){onEditing(drafts.size>0);v.edit.focus({preventScroll:true});refresh();}
     }
     function beginEdit(v, focus=true) {
       const d=drafts.get(v.job.id);if(!d||v.form)return;
+      if(d.editToken)editLeases.set(d.editToken,()=>rpc('EDIT_END',{id:v.job.id,token:d.editToken,save:false}));
       v.node.dataset.editing='true';v.read.hidden=true;v.actions.hidden=true;
       const area=el('div',undefined,'cq-edit-area'),input=el('textarea',undefined,'cq-editor');input.value=d.value;input.setAttribute('aria-label','Editar mensaje pendiente');
-      const footer=el('div',undefined,'cq-edit-footer'),hint=el('span','Cola pausada. Ctrl+Enter guarda · Esc cancela','cq-edit-hint');
+      const footer=el('div',undefined,'cq-edit-footer'),hint=el('span','La cola espera mientras editas. Ctrl+Enter guarda · Esc cancela','cq-edit-hint');
       const say=e=>{text(v.feedback,e);v.feedback.hidden=false;v.feedback.dataset.error='true';};
       const save=button('Guardar',async()=>{
         if(v.missing||v.saving||!alive())return;v.saving=true;v.cancel.disabled=true;save.disabled=true;input.readOnly=true;
         try {
           const fresh=await fullJob(v.job.id);
           if(fresh.text!==d.base)throw Error('El pendiente cambió en otra vista. Copia tu edición antes de cancelar y volver a abrirlo.');
-          await rpc('EDIT',{id:v.job.id,text:input.value});
-          if(alive()){endEdit(v);notify('Guardado. La cola sigue en pausa hasta que la reanudes.');}
+          // Old in-memory drafts predate edit ownership. Keep their manual pause;
+          // never guess whether it was created by editing or by the user.
+          const result=d.editToken?await rpc('EDIT_END',{id:v.job.id,token:d.editToken,save:true,text:input.value}):await rpc('EDIT',{id:v.job.id,text:input.value});
+          endEdit(v,d);
+          if(alive())notify(result?.editing?'Guardado. Queda otra edición abierta.':!d.editToken||result?.paused?'Guardado. Se mantiene la pausa de la cola.':'Guardado. La cola continúa automáticamente.');
         } finally {v.saving=false;v.cancel.disabled=false;input.readOnly=false;save.disabled=v.missing||!['queued','held','error'].includes(v.job.status);}
       },null,say);save.classList.add('cq-save');save.disabled=v.missing;
-      const cancel=button('Cancelar',()=>{if(!v.saving)endEdit(v);},null,say);v.cancel=cancel;
+      const cancel=button('Cancelar',async()=>{
+        if(v.saving||!alive())return;v.saving=true;cancel.disabled=true;save.disabled=true;input.readOnly=true;
+        try {if(d.editToken)await rpc('EDIT_END',{id:v.job.id,token:d.editToken,save:false});endEdit(v,d);}
+        finally {v.saving=false;cancel.disabled=false;input.readOnly=false;save.disabled=v.missing||!['queued','held','error'].includes(v.job.status);}
+      },null,say);v.cancel=cancel;
       const copy=button('Copiar edición',async()=>{await navigator.clipboard.writeText(input.value);notify('Edición copiada.');},null,say);
       footer.append(hint,copy,cancel,save);area.append(input,footer);v.body.append(area);v.form=area;v.save=save;v.input=input;v.hint=hint;
       input.addEventListener('input',()=>{d.value=input.value;onEditing(true);});
@@ -159,7 +182,7 @@
         sync(container,nodes);
       },
       get editing(){return drafts.size>0;},get editingIds(){return new Set(drafts.keys());},
-      discardEdits(){for(const v of views.values()){drafts.delete(v.job.id);v.form?.remove();v.form=null;delete v.node.dataset.editing;v.read.hidden=false;v.actions.hidden=false;}onEditing(false);},
+      discardEdits(){for(const v of views.values()){const d=drafts.get(v.job.id);if(d?.editToken)editLeases.delete(d.editToken);drafts.delete(v.job.id);v.form?.remove();v.form=null;delete v.node.dataset.editing;v.read.hidden=false;v.actions.hidden=false;}onEditing(false);},
       dispose(){live=false;views.clear();}
     };
   }
