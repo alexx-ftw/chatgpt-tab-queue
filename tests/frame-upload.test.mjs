@@ -7,7 +7,7 @@ function harness(missing=false){const listeners=[],calls=[],dispatches=[];const 
  class Transfer{constructor(){this.files=[];this.items={add:f=>this.files.push(f)};}}
  const ctx=vm.createContext({document,location:new URL('https://chatgpt.com/c/22222222-2222-4222-8222-222222222222'),crypto,Uint8Array,File,atob,DataTransfer:Transfer,Event:class{constructor(type,options){this.type=type;Object.assign(this,options);}},setTimeout,clearTimeout,console,
  CQClient:{prettySize:String,storeFile:()=>{},rpc:async(type,m)=>{calls.push({type,...m});if(type==='FILE_READ')return m.index===0?'AAEC/f7/':null;return true;}},
- CQPage:a=>{assert.equal(a.frameToken,TOKEN);return {ready:true,pathId:A,attachments:{count:0,unsupported:false}};},chrome:{runtime:{id:'test',getManifest:()=>({version:'0.6.0'}),onMessage:{addListener:fn=>listeners.push(fn)}}}});
+ CQPage:a=>{assert.equal(a.frameToken,TOKEN);if(a.cmd==='uiAnchor')return {form:childForm,targetId:A};return {ready:true,pathId:A,attachments:{count:0,unsupported:false}};},chrome:{runtime:{id:'test',getManifest:()=>({version:'0.6.0'}),onMessage:{addListener:fn=>listeners.push(fn)}}}});
  ctx.window={addEventListener(){}};vm.runInContext(readFileSync(new URL('../content.js',import.meta.url),'utf8'),ctx);
  const invoke=()=>{listeners[0]({channel:'cq2',type:'UPLOAD',jobId:'job1',token:'attempt1',frameToken:TOKEN,conversationId:A,files:[{id:'f1',name:'file.pdf',type:'application/pdf',size:6}]},{id:'test'},()=>{});};
  return {invoke,input,parentInput,calls,dispatches,async finished(){for(let i=0;i<50&&!calls.some(x=>x.type==='UPLOAD_RESULT');i++)await new Promise(r=>setImmediate(r));return calls.find(x=>x.type==='UPLOAD_RESULT');}};

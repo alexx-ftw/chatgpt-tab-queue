@@ -41,7 +41,7 @@ export function createSurfaceIO({api,page,frameFunc,timeoutMs=12000}) {
       return descriptor(tab,value);
     },
     async ensureBackground(conversation,job) {
-      if(conversation.isNew)return null;
+      if(conversation.isNew||conversation.kind==='dot')return null;
       const tabs=(await listTabs()).filter(t=>Number.isInteger(t.id)&&!t.discarded&&!t.frozen&&t.status!=='loading');
       tabs.sort((a,b)=>Number(b.id===job?.sourceTabId)-Number(a.id===job?.sourceTabId));
       const tab=tabs[0];if(!tab)return null;
