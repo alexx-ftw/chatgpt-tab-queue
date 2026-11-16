@@ -24,7 +24,7 @@ globalThis.CQPage = function CQPage(args) {
     const setTimeout = pageWorld.setTimeout.bind(pageWorld), clearTimeout = pageWorld.clearTimeout.bind(pageWorld);
     const queueMicrotask = (pageWorld.queueMicrotask || rootWorld.queueMicrotask).bind(pageWorld);
   args=args||{};
-  const FORM='form[data-chatgpt-composer],form[data-type="unified-composer"]';
+  const FORM='form[data-chatgpt-composer],form[data-type="unified-composer"],[data-role="composer"]';
   const EDITOR='[data-composer-markdown][contenteditable="true"],#prompt-textarea[contenteditable="true"],textarea#prompt-textarea,.ProseMirror[contenteditable="true"][role="textbox"]';
   const STOP=/^(stop|stop generating|stop response|detener|detener generación|detener respuesta|parar)$/i;
   const SEND=/^(send|send message|send prompt|enviar|enviar mensaje)$/i;
@@ -35,13 +35,31 @@ globalThis.CQPage = function CQPage(args) {
   const visible=e=>(!selectedFrame||(selectedFrame.isConnected&&pageWorld.document===document))&&!!e?.isConnected&&!e.closest('[hidden],[aria-hidden="true"],[inert]')&&getComputedStyle(e).display!=='none'&&getComputedStyle(e).visibility!=='hidden'&&!!e.getClientRects().length;
   const label=e=>e?.getAttribute('aria-label')||e?.getAttribute('title')||'';
   const enabled=e=>!e.disabled&&e.getAttribute('aria-disabled')!=='true';
-  const allForms=[...document.querySelectorAll(FORM)];
+  const dotMatch=location.pathname.match(/^\/dots\/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}~[a-f0-9]{32})\/?$/i);
+  const dotKey=dotMatch?.[1]||null;
+  const allForms=[...document.querySelectorAll(FORM)].filter(f=>f.matches('form')||
+    (dotKey&&f.closest('.conversation-footer')&&f.querySelector('[data-codex-composer-root]')));
   const formList=allForms.filter(f=>[...f.querySelectorAll(EDITOR)].some(visible));
   const form=formList.length===1?formList[0]:null,editor=form&&[...form.querySelectorAll(EDITOR)].find(visible);
   // Read-only local UI lookup. Return DOM nodes only to the caller in this world,
   // never through extension messaging. The panel and sender share this selection.
-  if(args.cmd==='uiAnchor')return {form,editor,totalForms:allForms.length,visibleForms:formList.length};
-  const pathId=location.pathname.match(/(?:^|\/)c\/([a-f0-9-]{20,64})(?:\/|$)/i)?.[1]||null;
+  // A dot's direct conversation and its Replies pane are separate destinations.
+  // Never infer idle from an enabled Send button: dots can accept input while working.
+  const dotPane=dotKey&&form?(form.closest('.thread-pane')||document):null;
+  const replyPanel=dotKey?form?.closest('.reply-chain-panel[role="dialog"]'):null;
+  const dotScrolls=dotPane?[...dotPane.querySelectorAll('[data-role="messages-scroll"]')].filter(visible):[];
+  const dotTranscript=replyPanel?.querySelector('[data-role="reply-chain-scroll"]')||(!replyPanel&&dotScrolls.length===1?dotScrolls[0]:null);
+  const dotRows=dotTranscript?[...dotTranscript.querySelectorAll('article.message-row[data-message-id]')]:[];
+  const validDotMessage=id=>/^[a-f0-9]{32}~[a-f0-9]{32}~CalpicoMessage~Sentinel_[a-f0-9]{32}$/i.test(id||'');
+  const replyRoot=replyPanel?dotRows[0]?.getAttribute('data-message-id'):null;
+  const dotContextValid=!!dotTranscript&&(!replyPanel||validDotMessage(replyRoot))&&
+    dotRows.every(e=>validDotMessage(e.getAttribute('data-message-id')))&&
+    new Set(dotRows.map(e=>e.getAttribute('data-message-id').split('~').slice(0,2).join('~'))).size<=1;
+  const pathId=dotKey?(dotContextValid?'dot:'+dotKey+(replyPanel?':reply:'+replyRoot:''):null):
+    location.pathname.match(/(?:^|\/)c\/([a-f0-9-]{20,64})(?:\/|$)/i)?.[1]||null;
+  const modalBlocker=[...document.querySelectorAll('[role="dialog"],[role="menu"],[role="listbox"]')].some(e=>
+    visible(e)&&!(dotKey&&(e===replyPanel||e.matches('[data-orbit-profile="true"][aria-modal="false"]'))));
+  if(args.cmd==='uiAnchor')return {form,editor:dotKey&&!dotContextValid?null:editor,targetId:pathId,nativeTabBlocked:modalBlocker,totalForms:allForms.length,visibleForms:formList.length};
   const localId=form?.querySelector('[data-above-composer-conversation-id]')?.getAttribute('data-above-composer-conversation-id')||null;
   const route=location.origin+location.pathname;
   function ensureRoute(){
@@ -49,6 +67,7 @@ globalThis.CQPage = function CQPage(args) {
     if(location.origin!=='https://chatgpt.com')throw Error('Dominio inesperado.');
     if(args.conversationId&&!args.conversationId.startsWith('draft:')&&pathId!==args.conversationId)throw Error('La conversación ha cambiado.');
     if(!editor)throw Error('No se encuentra un único editor activo.');
+    if(dotKey&&!dotContextValid)throw Error('No se puede identificar el hilo de este dot con seguridad. El borrador sigue intacto.');
     if(args.localId&&!pathId&&localId!==args.localId)throw Error('El chat nuevo cambió antes de enviar.');
   }
   function pmView(){
@@ -268,13 +287,28 @@ globalThis.CQPage = function CQPage(args) {
   const voice=buttons.find(b=>VOICE.test(label(b)));
   let state=stop?'busy':(send&&enabled(send))||(voice&&enabled(voice))?'idle':'unknown';
   if(form?.getAttribute('aria-busy')==='true')state='busy';
+  let dotStatus=null;
+  if(dotKey){
+    const profile=[...document.querySelectorAll('[data-orbit-profile-identity]')].flatMap(n=>[...n.querySelectorAll('p')]);
+    const badge=[...document.querySelectorAll('[data-orbit-profile-trigger]')].flatMap(n=>[...n.querySelectorAll('[role="status"]'),...(n.parentElement?.matches('[class~="group/orbit-profile"]')?n.parentElement.querySelectorAll('[role="status"]'):[])]);
+    const labels=[...profile,...badge].filter(visible).map(e=>words(e.textContent));
+    const busyStatus=labels.some(s=>/^(thinking|working|running|responding|pensando|trabajando|respondiendo)$/i.test(s));
+    const idleStatus=labels.length>0&&labels.every(s=>/^(active|idle|activo|activa)$/i.test(s));
+    const typing=dotPane?[...dotPane.querySelectorAll('.typing-indicator,.typing-bubble')].some(e=>
+      e.getAttribute('data-active')==='true'||e.getAttribute('data-visible')==='true'):false;
+    const workingTask=dotPane?[...dotPane.querySelectorAll('[data-orbit-thread-only]')].some(n=>
+      visible(n)&&[...n.querySelectorAll('button')].some(b=>visible(b)&&!!b.querySelector('[data-loading-indicator]'))):false;
+    const composerBusy=!!stop||form?.getAttribute('aria-busy')==='true';
+    state=busyStatus||typing||workingTask||composerBusy?'busy':dotContextValid&&idleStatus?'idle':'unknown';
+    dotStatus={signal:busyStatus?'profile-busy':typing?'typing':workingTask?'task-working':composerBusy?'composer-busy':idleStatus?'profile-idle':'unknown',reply:!!replyPanel};
+  }
   function messageId(e){const parent=e?.closest('[data-chatgpt-search-message-ids],[data-message-id],[data-turn-key]');return parent?.getAttribute('data-chatgpt-search-message-ids')?.split(' ')[0]||parent?.getAttribute('data-message-id')||parent?.getAttribute('data-turn-key')||null;}
-  const scope=form?.closest('[data-app-shell-focus-area="main"]')||form?.closest('main')||document;
-  const users=[...scope.querySelectorAll('[data-user-message-bubble="true"],[data-message-author-role="user"]')].filter((e,i,a)=>!a.some(x=>x!==e&&e.contains(x)));
+  const scope=dotKey?(dotTranscript||document):form?.closest('[data-app-shell-focus-area="main"]')||form?.closest('main')||document;
+  const users=dotKey?dotRows.filter(e=>e.matches('.self')):[...scope.querySelectorAll('[data-user-message-bubble="true"],[data-message-author-role="user"]')].filter((e,i,a)=>!a.some(x=>x!==e&&e.contains(x)));
   // Confirm the complete user message, never the first search-highlight block.
   // Reading is local and side-effect free. These variants retain formatting
   // markers; matching never strips punctuation or accepts a substring.
-  const RECEIPT_TEXT='[data-message-text],[data-message-content],.whitespace-pre-wrap,[data-search-result-target],.markdown';
+  const RECEIPT_TEXT='.message-text,[data-message-text],[data-message-content],.whitespace-pre-wrap,[data-search-result-target],.markdown';
   const receiptExcluded=n=>n?.nodeType===1&&(n.matches('button,[role="button"],svg,script,style,input,textarea,form,[hidden],[aria-hidden="true"],[inert],[data-markdown-copy="exclude"],[data-file-name],[data-composer-attachments]')||getComputedStyle(n).display==='none'||getComputedStyle(n).visibility==='hidden');
   function receiptText(node,markdown=false,preserveLists=false){
     if(node.nodeType===3)return node.nodeValue;
@@ -337,9 +371,10 @@ globalThis.CQPage = function CQPage(args) {
     const assistant=[...scope.querySelectorAll('[data-message-author-role="assistant"]')].at(-1);
     if(assistant?.closest('article')?.querySelector('[data-testid="copy-turn-action-button"]'))finalId=messageId(assistant);
   }
+  if(dotKey&&state==='idle')finalId=dotRows.filter(e=>!e.matches('.self')).at(-1)?.getAttribute('data-message-id')||null;
   let blocked='';
   if(navigator.onLine===false)blocked='Sin conexión';
-  else if([...document.querySelectorAll('[role="dialog"],[role="menu"],[role="listbox"]')].some(visible))blocked='Hay un menú o diálogo abierto';
+  else if(modalBlocker)blocked='Hay un menú o diálogo abierto';
   const error=[...(turn||form||document).querySelectorAll('[role="alert"],[data-testid="error-message"]')].find(e=>visible(e)&&clean(e.textContent));
   if(error)blocked='Aviso de ChatGPT: '+words(error.textContent).slice(0,220);
   const reasoning=form?.querySelector('[data-selected-reasoning-effort]');
@@ -348,7 +383,7 @@ globalThis.CQPage = function CQPage(args) {
     .filter(visible).map(e=>({label:words(label(e)||e.textContent)}))
     .filter(x=>x.label&&!/^(dictate|dictar|microphone|micrófono|select chatgpt model)$/i.test(x.label)):[];
   const model={engine:modelButton?words(modelButton.textContent):null,effort:reasoning?.getAttribute('data-selected-reasoning-effort')||null,effortLabel:reasoning?words(reasoning.querySelector('[class*="ModelPickerTriggerLabel"]')?.textContent||reasoning.textContent):null};
-  const snapshot={editorMethod:pmView()?'transaction':editor?.tagName==='TEXTAREA'?'textarea':editor?'native-edit':'unavailable',route,pathId,localId,title:document.title.replace(/\s*[-|·]\s*ChatGPT\s*$/i,''),state,sendEnabled:!!send&&enabled(send),text:textOf(editor),attachments:{count:at.count,items:at.items,unsupported:at.unsupported,loading:at.loading,selections:at.selections.map(s=>s.text),selectionError:at.selectionError},blocked,lastUser,finalId,model,options,ready:!!editor,oldUserscript:!!document.getElementById('eros-tab-queue')};
+  const snapshot={editorMethod:pmView()?'transaction':editor?.tagName==='TEXTAREA'?'textarea':editor?'native-edit':'unavailable',route,pathId,localId,title:document.title.replace(/\s*[-|·]\s*ChatGPT\s*$/i,'')+(dotKey&&replyPanel?' · Replies: '+words(dotRows[0]?.querySelector('.message-text')?.textContent||'').slice(0,70):''),state,sendEnabled:!!send&&enabled(send),text:textOf(editor),attachments:{count:at.count,items:at.items,unsupported:at.unsupported,loading:at.loading,selections:at.selections.map(s=>s.text),selectionError:at.selectionError},blocked,lastUser,finalId,model,options,dotStatus,ready:!!editor&&(!dotKey||dotContextValid),oldUserscript:!!document.getElementById('eros-tab-queue')};
   // Historical lookup is limited to the first user message after the saved
   // pre-send baseline. Never scan arbitrary old identical messages for a match.
   if(Object.hasOwn(args,'receiptAfter')){
@@ -424,7 +459,7 @@ globalThis.CQPage = function CQPage(args) {
   function startGuard(){
     ensureRoute();const previous=globalThis[GUARD];if(previous){stopGuard(previous);delete globalThis[GUARD];}
     const g={expires:Date.now()+(args.guardMs||300000),token:args.token,conversationId:pathId,text:args.text,backup:capture(),restoring:false,conflict:'',manual:false,listeners:[]};
-    const active=()=>location.pathname.match(/(?:^|\/)c\/([a-f0-9-]{20,64})(?:\/|$)/i)?.[1]===g.conversationId;
+    const active=()=>CQPage({cmd:'uiAnchor'}).targetId===g.conversationId;
     const read=()=>CQPage({cmd:'capture',conversationId:g.conversationId});
     const edited=event=>{
       if(!event.isTrusted||!active()||g.restoring||!event.target?.closest?.(EDITOR))return;
@@ -485,7 +520,7 @@ globalThis.CQPage = function CQPage(args) {
       expires:Date.now()+240000,clicked:false,interrupted:false,listeners:[],readonly:editor.getAttribute('aria-readonly')};
     const intercept=e=>{
       if(!e.isTrusted||!form.contains(e.target))return;
-      const livePath=location.pathname.match(/(?:^|\/)c\/([a-f0-9-]{20,64})(?:\/|$)/i)?.[1]||null;
+      const livePath=CQPage({cmd:'uiAnchor'}).targetId;
       const liveLocal=form.querySelector('[data-above-composer-conversation-id]')?.getAttribute('data-above-composer-conversation-id')||null;
       if(!g.editor?.isConnected||!g.form?.isConnected||(g.pathId?livePath!==g.pathId:liveLocal!==g.localId)){
         g.interrupted=true;releaseLocal(g);return;

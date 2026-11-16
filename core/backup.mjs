@@ -17,7 +17,9 @@ export function validateBackup(data){
  if(!s.conversations||typeof s.conversations!=='object'||!s.aliases||typeof s.aliases!=='object'||!Array.isArray(s.history)||!s.settings||data.files.length>10000||s.jobs.length>10000)throw Error('Estructura de copia no válida.');
  const ids=new Set(),needed=new Set();
  for(const [id,c] of Object.entries(s.conversations)){
-  if(c.id!==id||targetFromURL(c.url,c.isNew?c.id:undefined).id!==id)throw Error('La copia contiene un destino de conversación inválido.');
+  const target=targetFromURL(c.url,c.isNew||c.id.startsWith('dot:')?c.id:undefined);
+  if(c.id!==id||target.id!==id)throw Error('La copia contiene un destino de conversación inválido.');
+  if(target.kind==='dot'){c.kind='dot';c.replyRoot=target.replyRoot;}
  }
  for(const j of s.jobs){
   if(typeof j.id!=='string'||ids.has(j.id)||!s.conversations[j.conversationId]||typeof j.text!=='string'||j.text.length>2000000||!Array.isArray(j.files)||j.files.length>80||!['queued','held','preparing','submitting','uncertain','error'].includes(j.status))throw Error('Mensaje no válido en la copia.');

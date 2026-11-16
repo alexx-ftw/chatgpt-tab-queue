@@ -28,13 +28,13 @@ export function createCoordinator({store,io}) {
       idle.delete(tabId);
       return {ready:false,state:'unknown',route:c?.url||'',pathId:null,text:'',attachments:{count:0,items:[],unsupported:false,loading:false},idleStable:false};
     }
-    const key=`${raw.route}|${raw.lastUser?.id||''}`;
+    const key=`${raw.route}|${raw.pathId||''}|${raw.lastUser?.id||''}`;
     const prev=idle.get(tabId);
     if(raw.state!=='idle'||!raw.ready||raw.blocked) idle.delete(tabId);
     else if(!prev||prev.key!==key)idle.set(tabId,{key,since:now()});
     const state=await store.getState(),stable=idle.get(tabId);
     return {...raw,attachments:raw.attachments||{count:0,items:[],unsupported:false,loading:false},
-      target:raw.pathId?targetFromURL(raw.route):null,
+      target:raw.pathId?targetFromURL(raw.route,raw.pathId?.startsWith('dot:')?raw.pathId:undefined):null,
       idleStable:!!stable&&now()-stable.since>=state.settings.idleMs};
   }
   async function endGuards(job){
@@ -106,6 +106,7 @@ export function createCoordinator({store,io}) {
     if((!Number.isInteger(tab?.id)&&!tab?.cqFrame)||!tab.url)return false;
     try {
       if(c.isNew)return tab.id===job?.sourceTabId&&new URL(tab.url).origin+new URL(tab.url).pathname===c.url;
+      if(c.kind==='dot')return targetFromURL(tab.url).id===c.id.split(':reply:')[0];
       return targetFromURL(tab.url).id===c.id;
     }catch{return false;}
   }
@@ -115,6 +116,8 @@ export function createCoordinator({store,io}) {
     const tabs=(await io.listTabs()).filter(t=>tabMatches(t,c,job));
     tabs.sort((a,b)=>Number(b.id===job?.sourceTabId)-Number(a.id===job?.sourceTabId));
     let tab=tabs.find(t=>!t.discarded&&!t.frozen&&t.status!=='loading')||tabs[0];
+    if(c.kind==='dot'){tab=null;for(const candidate of tabs){if(candidate.discarded||candidate.frozen||candidate.status==='loading')continue;try{const snap=await inspect(candidate.id,c);if(snap.ready&&snap.pathId===c.id){tab=candidate;break;}}catch{}}}
+    if(!tab&&c.kind==='dot'){await note(c.id,'Abre el mismo chat o hilo de Replies del dot para continuar. No se cambiará el destino de estos mensajes.');return null;}
     if(!tab&&!c.isNew&&io.ensureBackground)tab=await io.ensureBackground(c,job);
     if(!tab){await note(c.id,'Mantén abierta una página de ChatGPT para continuar. No se abrirán pestañas ni se cambiará tu conversación.');return null;}
     const h={tabId:tab.id,conversationId:c.id,jobId:null,url:c.url,owned:false,internal:!!tab.cqFrame};
@@ -260,11 +263,12 @@ export function createCoordinator({store,io}) {
     // Do this BEFORE awaiting its status: a broken/frozen frame cannot delay recovery.
     // Never migrate a preparation that already touched the old composer. A possible
     // click may be observed elsewhere, but its original attempt is kept for receipts.
-    if(h && (h.internal || String(h.tabId).startsWith('frame:')) &&
+    if(h && (c.kind==='dot' || h.internal || String(h.tabId).startsWith('frame:')) &&
        (!j || j.status!=='preparing' || ((j.attempt?.stage||'model')==='model'&&!j.attempt?.localBackup))){
       const candidates=(await io.listTabs()).filter(t=>tabMatches(t,c,j||jobs[0])&&!t.discarded&&!t.frozen&&t.status!=='loading');
       candidates.sort((a,b)=>Number(b.id===(j||jobs[0])?.sourceTabId)-Number(a.id===(j||jobs[0])?.sourceTabId));
       for(const candidate of candidates){
+        if(c.kind==='dot'&&candidate.id===h.tabId)continue;
         let fresh;try{fresh=await inspect(candidate.id,c);}catch{continue;}
         if(!fresh.ready||fresh.pathId!==cid)continue;
         const previous=h;
@@ -335,7 +339,7 @@ export function createCoordinator({store,io}) {
       if(confirmed){
         const {result:sent}=await change(s=>{
           if(!find(s,j.id))return null;
-          const removed=acknowledge(s,j.id,confirmed,{...withFiles,target:withFiles.pathId?targetFromURL(withFiles.route):null},now());
+          const removed=acknowledge(s,j.id,confirmed,{...withFiles,target:withFiles.pathId?targetFromURL(withFiles.route,withFiles.pathId?.startsWith('dot:')?withFiles.pathId:undefined):null},now());
           const helper=Object.values(s.helpers).find(x=>x.tabId===tab.id);if(helper)helper.jobId=null;return removed;
         });
         if(sent){
@@ -401,6 +405,7 @@ export function createCoordinator({store,io}) {
       idle.delete(tab.id);return;
     }
     if(snap.blocked){await note(cid,snap.blocked);return;}
+    if(c.kind==='dot'&&snap.state==='unknown'){await note(cid,'Esperando a confirmar que el dot ha terminado. El mensaje sigue guardado.');return;}
     if(!snap.idleStable||snap.state!=='idle'||io.busyHint?.(cid))return;
     if(tab.cqFrame&&(!snap.lastUser?.id||!snap.finalId)){await note(cid,'Esperando a cargar el último turno terminado en la vista interna.');return;}
     if(snap.attachments.count||snap.attachments.unsupported){await note(cid,'Se conservan los adjuntos y el contexto de tu borrador. La cola espera a que los envíes o retires.');return;}

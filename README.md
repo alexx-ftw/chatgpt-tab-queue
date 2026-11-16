@@ -42,6 +42,47 @@ v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
 Transfer files contain private data: never upload them to this repository.
 The transfer screen currently caps total attachment data at 256 MiB.
 
+## v0.7.0: compatibilidad con Dots y Replies
+
+Estado de distribución: candidata probada, pendiente de firma y publicación.
+
+- Reconoce el compositor nativo de Dots sin exigir un elemento `form`. Tab
+  conserva el mensaje y los archivos capturados desde el adjuntador normal.
+- Distingue el chat principal de cada panel Replies mediante la ruta del dot
+  y el identificador nativo del mensaje inicial del hilo. No mezcla sus colas.
+- No interpreta «Send habilitado» ni «typing=false» como respuesta terminada.
+  Espera mientras el estado visible sea Thinking, haya escritura o una tarea
+  de Work siga activa. Solo continúa con una señal positiva de reposo;
+  una señal desconocida o contradictoria deja el mensaje guardado.
+- El perfil no modal y el panel Replies reconocido no bloquean Tab. Los
+  demás diálogos, menús y contextos nativos no reconocidos siguen protegidos.
+- Confirma el mensaje completo en el historial del destino antes de retirarlo.
+  Conserva el siguiente borrador, los adjuntos y la reanudación tras editar.
+- El diagnóstico añade el tipo de panel y la categoría de actividad, sin texto
+  de mensajes, títulos, nombres de archivos ni bytes de adjuntos.
+
+### Alcance de Dots
+
+La pestaña puede estar en segundo plano, pero el chat o panel Replies exacto
+ha de estar abierto en alguna pestaña existente. Si cambias de dot, cierras
+Replies o abres otro hilo, sus pendientes esperan al destino original.
+No se abre ni activa ninguna pestaña, no se cambia tu chat y no se sustituye un
+hilo por el chat principal. Esta versión no reconstruye Dots en un iframe.
+Si no se puede reconocer una señal de estado, la cola espera; no adivina.
+
+Se conserva el mismo canal nativo de actualizaciones, identidad y permisos.
+Las conversaciones normales de ChatGPT mantienen su transporte anterior.
+El DOM de Dots no es una API pública: esta adaptación se basa en las estructuras
+aportadas y puede requerir ajustes si cambian los controles.
+
+Verificación local: 339 pruebas Node y 186 comprobaciones de navegador
+(124 en Chromium y 62 en Camoufox), con almacenamiento en memoria, solicitudes
+interceptadas y comunicación de extensión simulada. Incluye 25 casos de Dots
+en ambos motores: Tab, reposo/actividad, independencia de destinos, cierre de
+Replies, envío único, borrador, bytes de PDF y vista estrecha de 390 px.
+No es una validación dentro de una cuenta real ni del ciclo real de auto-update.
+No se han incluido el HTML original, mensajes ni identificadores del usuario.
+
 ## v0.6.9: edición con pausa temporal
 
 **Estado de distribución:** publicada como versión estable con paquete CRX firmado y auto-update nativo.

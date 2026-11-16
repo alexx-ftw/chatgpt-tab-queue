@@ -1,4 +1,4 @@
-import {receiptMatches,confirmedReceipt} from './model.mjs';
+import {receiptMatches,confirmedReceipt,targetFromURL} from './model.mjs';
 /** Read-only diagnostic projection. Never include prompts, documents, filenames,
  * binary data, draft backups, attempt tokens, conversation titles or auth state. */
 const allowed = (value, values, fallback = 'unknown') => values.includes(value) ? value : fallback;
@@ -7,6 +7,7 @@ const allowed = (value, values, fallback = 'unknown') => values.includes(value) 
 function reasonCategory(value) {
  const text=String(value||'');
  if(!text)return 'none';
+ if(/^Esperando a confirmar que el dot/.test(text))return 'dot-state';
  if(/configur|modelo|esfuerzo|model|effort/i.test(text))return 'configuration';
  if(/frame|iframe|contexto interno/i.test(text))return 'internal-context';
  if(/sin conex|offline|network/i.test(text))return 'network';
@@ -30,7 +31,7 @@ function surfaceError(error) {
 }
 export async function collectDiagnostics(state,io,version){
  const result={version,generatedAt:new Date().toISOString(),paused:!!state.paused,tabs:[],conversations:[]};
- try{result.tabs=(await io.listTabs()).map(t=>({id:t.id,conversationId:String(t.url||'').match(/\/c\/([a-f0-9-]{20,64})/i)?.[1]||null,status:t.status||'unknown',discarded:!!t.discarded,frozen:!!t.frozen}));}
+ try{result.tabs=(await io.listTabs()).map(t=>({id:t.id,conversationId:(()=>{try{return targetFromURL(t.url).id;}catch{return null;}})(),status:t.status||'unknown',discarded:!!t.discarded,frozen:!!t.frozen}));}
  catch{result.tabsUnavailable=true;}
  const ids=new Set([...(state.jobs||[]).map(j=>j.conversationId),...Object.keys(state.helpers||{})]);
  result.conversations=await Promise.all([...ids].slice(0,100).map(async cid=>{
@@ -44,6 +45,7 @@ export async function collectDiagnostics(state,io,version){
     const pending=(state.jobs||[]).find(j=>j.conversationId===cid&&['submitting','uncertain'].includes(j.status));
     const p=await io.page(h.tabId,{cmd:'inspect',conversationId:cid,...(pending?{receiptAfter:pending.attempt?.beforeUser??null,expectedFiles:pending.files||[]}: {})});
     row.surface.page=p?{ready:!!p.ready,interface:interfaceSummary(p.interface),editorMethod:allowed(p.editorMethod,['transaction','textarea','native-edit','unavailable']),conversationId:p.pathId||null,state:allowed(p.state,['idle','busy','unknown']),sendEnabled:!!p.sendEnabled,blocked:!!p.blocked,blocker:reasonCategory(p.blocked),hasUser:!!p.lastUser?.id,hasFinal:!!p.finalId,attachmentCount:p.attachments?.count||0,unsupportedContext:!!p.attachments?.unsupported,effort:allowed(p.model?.effort,['none','minimal','low','medium','high','xhigh','max'],null)}:null;
+    if(p?.dotStatus)row.surface.page.dot={reply:p.dotStatus.reply===true,signal:allowed(p.dotStatus.signal,['profile-busy','typing','task-working','composer-busy','profile-idle','unknown'])};
     if(p&&pending)row.surface.page.confirmation={
       baselineFound:p.receiptAnchorFound===true,baselineAmbiguous:p.receiptAnchorAmbiguous===true,
       hasCandidate:!!p.submittedUser?.id,latestMatches:receiptMatches(pending,p.lastUser),
