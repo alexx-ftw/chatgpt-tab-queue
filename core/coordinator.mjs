@@ -258,12 +258,19 @@ export function createCoordinator({store,io}) {
     if(!c)return;
     let jobs=s.jobs.filter(j=>j.conversationId===cid),h=s.helpers[cid];
     let j=jobs.find(x=>x.id===h?.jobId)||jobs.find(x=>['preparing','submitting','uncertain'].includes(x.status));
-    let tab=null;
+    let tab=null,dotNeedsReplacement=false;
+    if(h&&c.kind==='dot'){
+      // A live matching dot surface stays pinned. Otherwise two open copies
+      // would keep moving/resetting a preparation before it reaches Send.
+      let current;
+      try{tab=await io.getTab(h.tabId);if(!tab.discarded&&!tab.frozen&&tab.status!=='loading')current=await inspect(tab.id,c);}catch{}
+      dotNeedsReplacement=!current?.ready||current.pathId!==cid;
+    }
     // A cached frame must not win over a conversation the user has reopened.
     // Do this BEFORE awaiting its status: a broken/frozen frame cannot delay recovery.
     // Never migrate a preparation that already touched the old composer. A possible
     // click may be observed elsewhere, but its original attempt is kept for receipts.
-    if(h && (c.kind==='dot' || h.internal || String(h.tabId).startsWith('frame:')) &&
+    if(h && (dotNeedsReplacement || h.internal || String(h.tabId).startsWith('frame:')) &&
        (!j || j.status!=='preparing' || ((j.attempt?.stage||'model')==='model'&&!j.attempt?.localBackup))){
       const candidates=(await io.listTabs()).filter(t=>tabMatches(t,c,j||jobs[0])&&!t.discarded&&!t.frozen&&t.status!=='loading');
       candidates.sort((a,b)=>Number(b.id===(j||jobs[0])?.sourceTabId)-Number(a.id===(j||jobs[0])?.sourceTabId));

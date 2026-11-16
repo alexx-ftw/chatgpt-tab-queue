@@ -75,7 +75,7 @@ Las conversaciones normales de ChatGPT mantienen su transporte anterior.
 El DOM de Dots no es una API pública: esta adaptación se basa en las estructuras
 aportadas y puede requerir ajustes si cambian los controles.
 
-Verificación local: 339 pruebas Node y 186 comprobaciones de navegador
+Verificación local: 340 pruebas Node y 186 comprobaciones de navegador
 (124 en Chromium y 62 en Camoufox), con almacenamiento en memoria, solicitudes
 interceptadas y comunicación de extensión simulada. Incluye 25 casos de Dots
 en ambos motores: Tab, reposo/actividad, independencia de destinos, cierre de
