@@ -8,6 +8,6 @@
     "check": "node tests/check.mjs"
   },
   "devDependencies": {
-    "@xmldom/xmldom": "0.9.8"
+    "@xmldom/xmldom": "0.9.12"
   }
 }
