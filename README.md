@@ -42,11 +42,10 @@ v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
 Transfer files contain private data: never upload them to this repository.
 The transfer screen currently caps total attachment data at 256 MiB.
 
-## v0.6.9 (preparada): edición con pausa temporal
+## v0.6.9: edición con pausa temporal
 
-**Estado de distribución:** corrección preparada en código; el paquete firmado
-y su actualización automática aún no se han publicado. El canal estable sigue
-en 0.6.8.
+**Estado de distribución:** publicada como versión estable con paquete CRX firmado y auto-update nativo.
+[Versión 0.6.9](https://github.com/alexx-ftw/chatgpt-tab-queue/releases/tag/v0.6.9).
 
 Editar un pendiente ya no crea una pausa manual permanente. La conversación se
 reserva mientras se edita; al guardar o cancelar, vuelve a su estado anterior.
@@ -82,7 +81,7 @@ pulsar Play una vez para quitar la ya existente. Las nuevas ediciones recuperan
 su estado automáticamente al guardar o cancelar.
 
 Se conservan la identidad pública, los permisos, la base de datos y el canal nativo
-de auto-update; la firma del nuevo paquete sigue pendiente. No se abren
+de auto-update. El paquete firmado está publicado. No se abren
 pestañas, no se cambia el chat visible ni se vacía o reenvía la cola al actualizar.
 
 Verificación local: 328 pruebas Node y 136 comprobaciones de navegador (99 en
