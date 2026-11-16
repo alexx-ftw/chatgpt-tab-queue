@@ -65,17 +65,28 @@ reserva mientras se edita; al guardar o cancelar, vuelve a su estado anterior.
   normalmente la vista cancela sus reservas; un reinicio completo durante una
   edición interrumpida mantiene ese chat pausado para revisión.
 - Una confirmación tardía no puede saltarse una edición abierta.
+- Las vistas de extensión tienen propietarios por documento; si se cierran sin
+  entregar el evento de salida, se liberan sus reservas sin borrar mensajes.
+  La limpieza de navegación se serializa con el inicio de la edición.
+- Una respuesta perdida después de guardar se recupera con el mismo token sin
+  guardar dos veces; la confirmación se conserva hasta que la vista la reconoce.
+- Durante la edición se puede elegir mantener la pausa o reanudar al terminar.
+  El estado «Editando» también aparece al editar un pendiente retenido o con error.
+- El auto-update espera a que terminen las reservas persistentes de edición.
+  Una actualización forzada deja la edición interrumpida para revisión, sin
+  conservar un bloqueo de editor inexistente.
 
 **Pausas antiguas:** hasta 0.6.8, editar se registraba como «Pausa manual», sin
 indicar su origen. No se borran esas pausas al actualizar: puede ser necesario
 pulsar Play una vez para quitar la ya existente. Las nuevas ediciones recuperan
 su estado automáticamente al guardar o cancelar.
 
-Misma firma, permisos, base de datos y canal nativo de auto-update. No se abren
+Se conservan la identidad pública, los permisos, la base de datos y el canal nativo
+de auto-update; la firma del nuevo paquete sigue pendiente. No se abren
 pestañas, no se cambia el chat visible ni se vacía o reenvía la cola al actualizar.
 
-Verificación local: 316 pruebas Node y 120 comprobaciones de navegador (91 en
-Chromium y 29 en Camoufox). Incluye 27 regresiones de edición y 21 casos de interfaz
+Verificación local: 328 pruebas Node y 136 comprobaciones de navegador (99 en
+Chromium y 37 en Camoufox). Incluye 38 regresiones de edición y 29 casos de interfaz
 repetidos en ambos motores, pausas manuales, concurrencia, fallos de guardado y
 un envío único después de guardar. Perfiles aislados, solicitudes interceptadas,
 almacenamiento en memoria y comunicación de extensión simulada; no es una

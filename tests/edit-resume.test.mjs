@@ -39,3 +39,53 @@ test('closing an editing tab preserves a deliberate user pause',async()=>{const 
 test('late confirmation resolves its timeout without bypassing an open edit',async()=>{const f=fixture(),first=f.add(),tail=f.add(A,'Next');await f.store.changeState(s=>{markPreparing(s,first.id,1,{lastUser:{id:'before'}},1);markSubmitting(s,first.id,2);s.jobs[0].status='uncertain';s.jobs[0].reason=ACK_TIMEOUT_REASON;s.conversations[A].paused=true;s.conversations[A].reason=ACK_TIMEOUT_REASON;});await begin(f,tail);await f.store.changeState(s=>acknowledge(s,first.id,{id:'sent',text:'Original',files:[]},{state:'idle'},3));assert.equal(f.s.conversations[A].paused,true);await end(f,tail,{save:true,text:'Edited next'});assert.equal(f.s.conversations[A].paused,false);});
 
 test('a late Save after a completed cancellation never reports a false success',async()=>{const f=fixture(),j=f.add();await begin(f,j);await end(f,j);await assert.rejects(end(f,j,{save:true,text:'Not saved'}),/canceló/);assert.equal(f.s.jobs[0].text,'Original');});
+
+test('navigation cleanup is serialized after an in-flight edit begin',async()=>{
+ const f=fixture(),j=f.add();let unlock,entered;const gate=new Promise(r=>unlock=r),started=new Promise(r=>entered=r);let first=true,serial=Promise.resolve();const change=f.store.changeState;
+ f.store.changeState=fn=>{const next=serial.then(async()=>{if(first){first=false;entered();await gate;}return change(fn);});serial=next.catch(()=>{});return next;};
+ const opening=begin(f,j,'edit-race-001','tab:4:old-doc');await started;const closing=f.c.abandonTabEdits(4);await Promise.resolve();unlock();await Promise.all([opening,closing]);
+ assert.equal(f.s.conversations[A].paused,false);assert.ok(!f.s.conversations[A].editPause);assert.equal(f.s.jobs[0].text,'Original');
+});
+test('closed manager documents release only their own durable edits without pagehide',async()=>{
+ const f=fixture(),a=f.add(),b=f.add(A,'Second');await begin(f,a,'manager-edit-a','ui-document:doc-a');await begin(f,b,'manager-edit-b','ui-document:doc-b');
+ await f.c.reconcileUIEdits({getContexts:async()=>[{documentId:'doc-a'}]});assert.equal(f.s.conversations[A].editPause.sessions.length,1);assert.equal(f.s.conversations[A].paused,true);
+ await f.c.reconcileUIEdits({getContexts:async()=>[]});assert.ok(!f.s.conversations[A].editPause);assert.equal(f.s.conversations[A].paused,false);assert.equal(f.s.jobs[0].text,'Original');
+});
+test('manager cleanup never cancels an owner created after its context snapshot',async()=>{
+ const f=fixture(),a=f.add(),b=f.add(A,'Second');await begin(f,a,'manager-edit-a','ui-document:doc-a');let release,entered;const ready=new Promise(r=>entered=r);
+ const cleaning=f.c.reconcileUIEdits({getContexts:()=>{entered();return new Promise(r=>release=r);}});await ready;await begin(f,b,'manager-edit-b','ui-document:doc-b');release([]);await cleaning;
+ assert.equal(f.s.conversations[A].editPause.sessions.length,1);assert.equal(f.s.conversations[A].editPause.sessions[0].owner,'ui-document:doc-b');
+});
+test('unavailable browser contexts retain edits instead of guessing they closed',async()=>{
+ const f=fixture(),j=f.add();await begin(f,j,'manager-edit-a','ui-document:doc-a');await f.c.reconcileUIEdits({getContexts:async()=>{throw Error('temporarily unavailable');}});
+ assert.equal(f.s.conversations[A].paused,true);assert.equal(f.s.conversations[A].editPause.sessions.length,1);
+});
+test('extension UI owners are unique per document and tab-aware when available',async()=>{
+ const {uiEditOwner}=await import('../core/editing.mjs');assert.equal(uiEditOwner({documentId:'doc-a',tab:{id:4}}),'ui-tab:4:doc-a');assert.equal(uiEditOwner({documentId:'doc-b'}),'ui-document:doc-b');assert.throws(()=>uiEditOwner({}),/documento/i);
+ const f=fixture(),j=f.add();await begin(f,j,'manager-edit-a','ui-tab:4:doc-a');await f.c.abandonTabEdits(4);assert.equal(f.s.conversations[A].paused,false);
+});
+test('lost Save result remains retryable after more than twenty unrelated completions',async()=>{
+ const f=fixture(),a=f.add(),b=f.add(A,'Second');await begin(f,a);await end(f,a,{save:true,text:'Once'});
+ for(let i=0;i<25;i++){const token='later-token-'+i;await begin(f,b,token);await end(f,b,{},token);}
+ await end(f,a,{save:true,text:'Once'});assert.equal(f.s.jobs[0].text,'Once');assert.equal(f.s.jobs[0].editRevision,1);
+ await f.c.ackEdit({id:a.id,token:'edit-token-111',owner:'view-a'});assert.ok(!f.s.conversations[A].editReceipts.some(r=>r.token==='edit-token-111'));
+});
+test('a foreign view cannot acknowledge another view completed edit',async()=>{
+ const f=fixture(),j=f.add();await begin(f,j);await end(f,j);await assert.rejects(f.c.ackEdit({id:j.id,token:'edit-token-111',owner:'other'}));assert.equal(f.s.conversations[A].editReceipts.length,1);
+});
+test('forced extension update releases edit ownership but leaves interrupted work review-paused',async()=>{
+ const {recoverAfterUpdate}=await import('../core/model.mjs');const f=fixture(),j=f.add();await begin(f,j);await f.store.changeState(recoverAfterUpdate);assert.ok(!f.s.conversations[A].editPause);assert.equal(f.s.conversations[A].paused,true);assert.match(f.s.conversations[A].reason,/actualiz/i);await f.c.resume(A);assert.equal(f.s.conversations[A].paused,false);
+});
+test('explicit resume during edit restores only future intent, never bypassing the reservation',async()=>{
+ const f=fixture(),j=f.add();await f.c.pause(A);await begin(f,j);await f.c.resume(A);assert.equal(f.s.conversations[A].paused,true);f.pages.get(1).state='idle';await f.steps();assert.equal(f.sends.length,0);await end(f,j);assert.equal(f.s.conversations[A].paused,false);
+});
+
+test('atomic save checks the displayed base even for an unversioned external change',async()=>{
+ const f=fixture(),j=f.add();await begin(f,j);await f.store.changeState(s=>s.jobs[0].text='External change');
+ await assert.rejects(end(f,j,{save:true,base:'Original',text:'Stale edit'}),/cambió/);assert.equal(f.s.jobs[0].text,'External change');assert.equal(f.s.conversations[A].paused,true);
+});
+test('unacknowledged completion evidence is never silently evicted at the per-owner cap',async()=>{
+ const f=fixture(),j=f.add();for(let i=0;i<256;i++){const token='retained-token-'+i;await begin(f,j,token);await end(f,j,{},token);}
+ await assert.rejects(begin(f,j,'retained-token-256'),/demasiadas/);assert.equal(f.s.conversations[A].paused,false);assert.equal(f.s.conversations[A].editReceipts.length,256);
+ await f.c.ackEdit({id:j.id,token:'retained-token-0',owner:'view-a'});await begin(f,j,'retained-token-256');await end(f,j,{},'retained-token-256');
+});

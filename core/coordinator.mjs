@@ -1,4 +1,4 @@
-import {beginQueueEdit,endQueueEdit,hasEdits,retainPause,abandonTabEdits} from './editing.mjs';
+import {beginQueueEdit,endQueueEdit,hasEdits,retainPause,abandonTabEdits,abandonOwnerEdits,uiEditOwners,missingUIEditOwners,acknowledgeQueueEdit,EDIT_REASON} from './editing.mjs';
 import {canonical,addJob,markPreparing,markSubmitting,acknowledge,confirmedReceipt,ACK_TIMEOUT_REASON,reconcileWait,clearQueue,targetFromURL,migrateState} from './model.mjs';
 
 /** Durable per-conversation lanes; browser waits in A never block B. io is the only browser dependency (also used by tests). */
@@ -82,7 +82,7 @@ export function createCoordinator({store,io}) {
     return change(s=>{const id=s.aliases[conversationId]||conversationId;
       if(!id){s.paused=false;s.reason='';}
       for(const c of Object.values(s.conversations))if(!id||c.id===id){
-        if(hasEdits(c))continue;
+        if(hasEdits(c)){c.editPause.resume=true;c.reason=EDIT_REASON;continue;}
         if(s.jobs.some(j=>j.conversationId===c.id&&['submitting','uncertain','error','held'].includes(j.status)))continue;
         c.paused=false;c.reason='';c.nextCheckAt=0;
       }
@@ -440,7 +440,15 @@ export function createCoordinator({store,io}) {
     await Promise.all(work);
   }
   return {tick,clear,remove,pause,resume,retry,uploadResult,change,emit,
-    abandonTabEdits:async tabId=>{const s=await store.getState();if(Object.values(s.conversations).some(c=>c.editPause?.sessions.some(x=>x.owner.startsWith(`tab:${tabId}:`))))return change(s=>abandonTabEdits(s,tabId));},
+    // Enqueue cleanup atomically, even when an EDIT_BEGIN has not committed yet.
+    abandonTabEdits:tabId=>change(s=>abandonTabEdits(s,tabId)),
+    reconcileUIEdits:async runtime=>{
+      const owners=uiEditOwners(await store.getState());if(!owners.length||typeof runtime?.getContexts!=='function')return;
+      let contexts;try{contexts=await runtime.getContexts({});}catch{return;}
+      if(!Array.isArray(contexts))return;
+      const missing=missingUIEditOwners(owners,contexts);if(missing.length)return change(s=>abandonOwnerEdits(s,missing));
+    },
+    ackEdit:async p=>(await change(s=>acknowledgeQueueEdit(s,p))).result,
     beginEdit:async p=>(await change(s=>beginQueueEdit(s,p))).result,
     endEdit:async p=>(await change(s=>endQueueEdit(s,p))).result};
 }

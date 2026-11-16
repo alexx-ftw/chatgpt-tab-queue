@@ -23,7 +23,7 @@
     const note=V.el('p','','conversation-note'),jobs=V.el('div',undefined,'group-jobs');node.append(head,note,jobs);
     const view={node,head,title,sub,note,jobs,c,list:null};
     const open=action('Abrir chat',()=>rpc('OPEN_CHAT',{conversationId:c.id}),'open');
-    const pause=action('Pausar esta cola',async()=>{await rpc(view.c.paused?'RESUME':'PAUSE',{conversationId:c.id});await refresh();},'pause');view.pause=pause;
+    const pause=action('Pausar esta cola',async()=>{await rpc(V.pauseAction(view.c).type,{conversationId:c.id});await refresh();},'pause');view.pause=pause;
     const clear=action('Vaciar este chat',async()=>{
       const count=state.jobs.filter(j=>j.conversationId===c.id).length;if(!count)return;
       if(confirm(`¿Vaciar los ${count} pendientes de esta conversación y sus archivos locales? La respuesta en curso y el historial no se eliminan.`)){await rpc('CLEAR_CHAT',{conversationId:c.id});view.list.discardEdits();await refresh();}
@@ -51,7 +51,7 @@
       V.text(v.title,c.title||'Conversación');
       const filtered=g.jobs.length!==g.all.length;
       V.text(v.sub,`${filtered?`${g.jobs.length} de ${g.all.length}`:g.all.length} pendiente${g.all.length===1?'':'s'} · ${V.queueStatus(c,g.all,{paused:state.paused})}`);
-      const paused=c.paused;const pauseLabel=paused?'Reanudar esta cola':'Pausar esta cola';v.pause.title=pauseLabel;v.pause.setAttribute('aria-label',pauseLabel);V.setIcon(v.pause,paused?'play':'pause');v.pause.disabled=!!c.editing;if(c.editing)v.pause.title='Guarda o cancela la edición para continuar';v.clear.disabled=!g.all.length;
+      const pause=V.pauseAction(c);v.pause.title=pause.label;v.pause.setAttribute('aria-label',pause.label);V.setIcon(v.pause,pause.icon);v.pause.disabled=false;v.clear.disabled=!g.all.length;
       V.text(v.note,c.reason||'');v.note.hidden=!c.reason;
       const positions=new Map(g.all.map((j,i)=>[j.id,i]));v.list.update(g.jobs,{paused:state.paused||c.paused,positions});nodes.push(v.node);
     }

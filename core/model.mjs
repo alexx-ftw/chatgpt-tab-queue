@@ -156,6 +156,7 @@ export function clearQueue(s,conversationId=null){
 /** An extension upgrade is not a browser restart. Keep safe queues and manual pauses. */
 export function recoverAfterUpdate(s){
   migrateState(s);
+  interruptQueueEdits(s,'La edición se interrumpió durante la actualización. Revisa el pendiente antes de reanudar.');
   for(const j of s.jobs){
     if(j.status==='submitting'){j.status='uncertain';j.reason='Actualización durante un posible envío. Se comprobará su confirmación, sin reenviarlo.';}
     else if(j.status==='preparing'){

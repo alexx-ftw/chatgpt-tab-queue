@@ -46,16 +46,24 @@
     return {label, symbol, attention:['held','uncertain','error'].includes(job?.status)};
   }
   function queueStatus(c, jobs, {paused=false,busy=false} = {}) {
+    if(c?.editing)return paused?'Editando · En pausa global':'Editando';
     if (jobs.some(j => ['error','held','uncertain'].includes(j.status))) return 'Requiere revisión';
     if (jobs.some(j => j.status === 'submitting')) return 'Confirmando envío';
     if (jobs.some(j => j.status === 'preparing')) return 'Preparando';
     if (paused) return 'En pausa';
-    if (c?.editing) return 'Editando';
     if (c?.paused) return 'En pausa';
     if (c?.waiting || busy) return 'Esperando respuesta';
     if (String(c?.reason || '').startsWith('Esperando al navegador:')) return 'Reconectando…';
     if (c?.reason) return 'Esperando';
     return 'Pendiente';
+  }
+  function pauseAction(c,globalPaused=false,allowGlobal=false){
+    if(c?.editing){
+      const resume=c.editResume===false;
+      return {type:resume?'RESUME':'PAUSE',global:false,label:resume?'Reanudar al terminar la edición':'Mantener en pausa después de editar',icon:resume?'play':'pause'};
+    }
+    if(globalPaused&&allowGlobal)return {type:'RESUME',global:true,label:'Reanudar todas las colas',icon:'play'};
+    return {type:c?.paused?'RESUME':'PAUSE',global:false,label:c?.paused?'Reanudar esta cola':'Pausar esta cola',icon:c?.paused?'play':'pause'};
   }
   function groups(state, query='', mode='all', keep=new Set()) {
     const needle=normalize(query.trim()), map=new Map();
@@ -109,6 +117,7 @@
         if(drafts.has(v.job.id)||v.busy)return;v.busy=true;
         const token=Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
         let retained=false;
+        editLeases.set(token,()=>rpc('EDIT_END',{id:v.job.id,token,save:false}));
         try {
           const reservation=await rpc('EDIT_BEGIN',{id:v.job.id,token}),full=reservation.job;
           if(!alive()||!node.isConnected)return;
@@ -117,7 +126,7 @@
           beginEdit(v);onEditing(true);await refresh();
         } finally {
           v.busy=false;
-          if(!retained)await rpc('EDIT_END',{id:v.job.id,token,save:false}).catch(e=>notify(e.message));
+          if(!retained){editLeases.delete(token);await rpc('EDIT_END',{id:v.job.id,token,save:false}).then(()=>rpc('EDIT_ACK',{id:v.job.id,token})).catch(e=>notify(e.message));}
         }
       },'edit');
       v.retry=act('Reintentar pendiente',async()=>{if(confirm('Comprueba que no se haya enviado y revisa el borrador antes de reactivar este pendiente. ¿Continuar?')){await rpc('RETRY',{id:v.job.id});await refresh();}},'retry');
@@ -126,7 +135,7 @@
       return v;
     }
     function endEdit(v,d) {
-      if(d?.editToken)editLeases.delete(d.editToken);
+      if(d?.editToken){editLeases.delete(d.editToken);rpc('EDIT_ACK',{id:v.job.id,token:d.editToken}).catch(()=>{});}
       if(drafts.get(v.job.id)===d)drafts.delete(v.job.id);v.form?.remove();v.form=null;delete v.node.dataset.editing;v.read.hidden=false;v.actions.hidden=false;
       if(alive()){onEditing(drafts.size>0);v.edit.focus({preventScroll:true});refresh();}
     }
@@ -140,11 +149,12 @@
       const save=button('Guardar',async()=>{
         if(v.missing||v.saving||!alive())return;v.saving=true;v.cancel.disabled=true;save.disabled=true;input.readOnly=true;
         try {
-          const fresh=await fullJob(v.job.id);
-          if(fresh.text!==d.base)throw Error('El pendiente cambió en otra vista. Copia tu edición antes de cancelar y volver a abrirlo.');
+          // New edits validate revision and completion proof atomically in the
+          // worker. A lost Save reply must not be rejected by a stale local base.
+          if(!d.editToken){const fresh=await fullJob(v.job.id);if(fresh.text!==d.base)throw Error('El pendiente cambió en otra vista. Copia tu edición antes de cancelar y volver a abrirlo.');}
           // Old in-memory drafts predate edit ownership. Keep their manual pause;
           // never guess whether it was created by editing or by the user.
-          const result=d.editToken?await rpc('EDIT_END',{id:v.job.id,token:d.editToken,save:true,text:input.value}):await rpc('EDIT',{id:v.job.id,text:input.value});
+          const result=d.editToken?await rpc('EDIT_END',{id:v.job.id,token:d.editToken,save:true,base:d.base,text:input.value}):await rpc('EDIT',{id:v.job.id,text:input.value});
           endEdit(v,d);
           if(alive())notify(result?.editing?'Guardado. Queda otra edición abierta.':!d.editToken||result?.paused?'Guardado. Se mantiene la pausa de la cola.':'Guardado. La cola continúa automáticamente.');
         } finally {v.saving=false;v.cancel.disabled=false;input.readOnly=false;save.disabled=v.missing||!['queued','held','error'].includes(v.job.status);}
@@ -186,5 +196,5 @@
       dispose(){live=false;views.clear();}
     };
   }
-  globalThis.CQView = {el,text,icon,setIcon,button,sync,phase,queueStatus,groups,css,style,createJobList};
+  globalThis.CQView = {el,text,icon,setIcon,button,sync,phase,queueStatus,pauseAction,groups,css,style,createJobList};
 })();
