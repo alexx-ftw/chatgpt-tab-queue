@@ -42,7 +42,10 @@ v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
 Transfer files contain private data: never upload them to this repository.
 The transfer screen currently caps total attachment data at 256 MiB.
 
-## v0.7.0 (preparada): cola para dots y Replies
+## v0.7.0: cola para dots y Replies
+
+**Estado de distribución:** publicada con paquete CRX firmado y auto-update nativo.
+[Versión 0.7.0](https://github.com/alexx-ftw/chatgpt-tab-queue/releases/tag/v0.7.0).
 
 La cola reconoce el compositor de mensajes de `/dots/` además del compositor de
 conversaciones normales. El chat principal y cada hilo Replies tienen destinos
@@ -76,7 +79,7 @@ enviar o restaurar un borrador; cambiar de hilo nunca redirige un pendiente.
 
 Sin permisos nuevos, servicios locales ni cambio del canal de auto-update. Los
 mensajes, adjuntos y pausas existentes no se borran al actualizar. La distribución
-firmada de esta versión todavía no se ha publicado.
+firmada de esta versión está publicada; no necesitas reinstalar ni importar la cola.
 
 Validación: pruebas de modelo, destinos, actividad, confirmación y protección del
 borrador; navegadores aislados con red interceptada y comunicación/almacenamiento
