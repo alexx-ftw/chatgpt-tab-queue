@@ -28,13 +28,13 @@ export function createCoordinator({store,io}) {
       idle.delete(tabId);
       return {ready:false,state:'unknown',route:c?.url||'',pathId:null,text:'',attachments:{count:0,items:[],unsupported:false,loading:false},idleStable:false};
     }
-    const key=`${raw.route}|${raw.lastUser?.id||''}`;
+    const key=`${raw.route}|${raw.pathId||''}|${raw.lastUser?.id||''}`;
     const prev=idle.get(tabId);
     if(raw.state!=='idle'||!raw.ready||raw.blocked) idle.delete(tabId);
     else if(!prev||prev.key!==key)idle.set(tabId,{key,since:now()});
     const state=await store.getState(),stable=idle.get(tabId);
     return {...raw,attachments:raw.attachments||{count:0,items:[],unsupported:false,loading:false},
-      target:raw.pathId?targetFromURL(raw.route):null,
+      target:raw.pathId?targetFromURL(raw.route,raw.pathId):null,
       idleStable:!!stable&&now()-stable.since>=state.settings.idleMs};
   }
   async function endGuards(job){
@@ -106,6 +106,7 @@ export function createCoordinator({store,io}) {
     if((!Number.isInteger(tab?.id)&&!tab?.cqFrame)||!tab.url)return false;
     try {
       if(c.isNew)return tab.id===job?.sourceTabId&&new URL(tab.url).origin+new URL(tab.url).pathname===c.url;
+      if(c.kind==='dot')return !tab.cqFrame&&targetFromURL(tab.url,c.id).id===c.id;
       return targetFromURL(tab.url).id===c.id;
     }catch{return false;}
   }
@@ -115,8 +116,9 @@ export function createCoordinator({store,io}) {
     const tabs=(await io.listTabs()).filter(t=>tabMatches(t,c,job));
     tabs.sort((a,b)=>Number(b.id===job?.sourceTabId)-Number(a.id===job?.sourceTabId));
     let tab=tabs.find(t=>!t.discarded&&!t.frozen&&t.status!=='loading')||tabs[0];
-    if(!tab&&!c.isNew&&io.ensureBackground)tab=await io.ensureBackground(c,job);
-    if(!tab){await note(c.id,'Mantén abierta una página de ChatGPT para continuar. No se abrirán pestañas ni se cambiará tu conversación.');return null;}
+    if(c.kind==='dot'){tab=null;for(const t of tabs){if(t.discarded||t.frozen||t.status==='loading')continue;try{const p=await io.page(t.id,{cmd:'inspect'});if(p?.ready&&p.pathId===c.id){tab=t;break;}}catch{}}}
+    if(!tab&&!c.isNew&&c.kind!=='dot'&&io.ensureBackground)tab=await io.ensureBackground(c,job);
+    if(!tab){await note(c.id,c.kind==='dot'?'La cola del dot espera a que esté abierta la misma vista o el mismo hilo Replies. No se abrirá ni cambiará ninguna pestaña.':'Mantén abierta una página de ChatGPT para continuar. No se abrirán pestañas ni se cambiará tu conversación.');return null;}
     const h={tabId:tab.id,conversationId:c.id,jobId:null,url:c.url,owned:false,internal:!!tab.cqFrame};
     await change(s=>{s.helpers[c.id]=h;});
     return tab;
@@ -285,6 +287,11 @@ export function createCoordinator({store,io}) {
     }
     if(h){
       if(!tab)try{tab=await io.getTab(h.tabId);}catch{}
+      // Dots reuse the URL across main/Replies. Revalidate the live scope before
+      // keeping a cached helper; another already-open tab may own the right thread.
+      if(tab&&c.kind==='dot'&&!tab.discarded&&!tab.frozen&&tab.status!=='loading'){
+        const live=await io.page(tab.id,{cmd:'inspect'});if(!live?.ready||live.pathId!==cid)tab=null;
+      }
       if(tab&&!tabMatches(tab,c,j||jobs[0])&&!(c.isNew&&j&&['submitting','uncertain'].includes(j.status)&&tab.id===j.attempt?.tabId))tab=null;
       if(!tab){
         if(j?.status==='preparing'){
@@ -335,7 +342,7 @@ export function createCoordinator({store,io}) {
       if(confirmed){
         const {result:sent}=await change(s=>{
           if(!find(s,j.id))return null;
-          const removed=acknowledge(s,j.id,confirmed,{...withFiles,target:withFiles.pathId?targetFromURL(withFiles.route):null},now());
+          const removed=acknowledge(s,j.id,confirmed,{...withFiles,target:withFiles.pathId?targetFromURL(withFiles.route,withFiles.pathId):null},now());
           const helper=Object.values(s.helpers).find(x=>x.tabId===tab.id);if(helper)helper.jobId=null;return removed;
         });
         if(sent){
@@ -401,6 +408,7 @@ export function createCoordinator({store,io}) {
       idle.delete(tab.id);return;
     }
     if(snap.blocked){await note(cid,snap.blocked);return;}
+    if(c.kind==='dot'&&snap.state==='unknown'){await note(cid,'Esperando un estado de actividad verificable del dot. La cola no interpreta un indicador apagado como fin de respuesta.');return;}
     if(!snap.idleStable||snap.state!=='idle'||io.busyHint?.(cid))return;
     if(tab.cqFrame&&(!snap.lastUser?.id||!snap.finalId)){await note(cid,'Esperando a cargar el último turno terminado en la vista interna.');return;}
     if(snap.attachments.count||snap.attachments.unsupported){await note(cid,'Se conservan los adjuntos y el contexto de tu borrador. La cola espera a que los envíes o retires.');return;}

@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {newState,addJob,targetFromURL} from '../core/model.mjs';
+import {createCoordinator} from '../core/coordinator.mjs';
+const KEY='11111111-1111-4111-8111-111111111111~22222222222242228222222222222222',url='https://chatgpt.com/dots/'+KEY;
+const MAIN='dot:'+KEY+':main',REPLY='dot:'+KEY+':reply:33333333333343338333333333333333~33333333333343338333333333333333~CalpicoMessage~Sentinel_44444444444444448444444444444444';
+function setup(){let s=newState(),time=10000,chain=Promise.resolve();const sends=[],frames=[],pages=new Map(),tabs=[];
+ const page=(id,dest)=>{pages.set(id,{ready:true,route:url,pathId:dest,state:'busy',blocked:'',text:'Keep draft',attachments:{count:0,unsupported:false},model:{},options:[],lastUser:{id:'before-'+id,text:'Before'},finalId:'final-'+id});tabs.push({id,url,status:'complete'});};page(1,MAIN);page(2,REPLY);
+ const store={getState:async()=>structuredClone(s),changeState:fn=>{const p=chain.then(()=>{const copy=structuredClone(s),result=fn(copy);s=copy;return {state:structuredClone(copy),result:structuredClone(result)};});chain=p.catch(()=>{});return p;},deleteFile:async()=>{}};
+ const io={now:()=>time,changed:async()=>{},listTabs:async()=>tabs,getTab:async id=>tabs.find(t=>t.id===id),ensureBackground:async()=>{frames.push(true);return null;},page:async(id,a)=>{const p=pages.get(id);if(a.cmd==='localSend'){assert.equal(a.conversationId,p.pathId);sends.push({tab:id,dest:p.pathId,text:a.text});p.state='busy';p.lastUser={id:'sent-'+sends.length,text:a.text,files:[]};return {clicked:true,restored:true};}if(a.cmd==='capture')return {...structuredClone(p),doc:null};return structuredClone(p);}};
+ const c=createCoordinator({store,io});return {c,pages,tabs,sends,frames,get state(){return s;},add(dest=MAIN){return addJob(s,{target:targetFromURL(url,dest),text:'Queued',files:[],sourceTabId:1});},async ticks(n=12){for(let i=0;i<n;i++){await c.tick();time+=2000;}}};}
+test('dot queued work uses the matching live thread even when the source tab shows another',async()=>{const x=setup();x.add(REPLY);x.pages.get(1).state='idle';x.pages.get(2).state='idle';await x.ticks();assert.deepEqual(x.sends,[{tab:2,dest:REPLY,text:'Queued'}]);assert.equal(x.frames.length,0);});
+test('an existing dot helper that switched threads does not pin the queue away from another valid tab',async()=>{const x=setup();x.add();await x.ticks(2);assert.equal(x.state.helpers[MAIN].tabId,1);x.pages.get(1).pathId=REPLY;x.pages.get(2).pathId=MAIN;x.pages.get(1).state=x.pages.get(2).state='idle';await x.ticks();assert.deepEqual(x.sends,[{tab:2,dest:MAIN,text:'Queued'}]);assert.equal(x.frames.length,0);});
+test('closing the dot keeps pending work and never creates any fallback surface',async()=>{const x=setup();x.add();x.tabs.length=0;await x.ticks();assert.equal(x.sends.length,0);assert.equal(x.state.jobs.length,1);assert.equal(x.frames.length,0);});
+test('unknown dot activity never starts preparation',async()=>{const x=setup();x.add();x.pages.get(1).state='unknown';await x.ticks();assert.equal(x.sends.length,0);assert.equal(x.state.jobs[0].status,'queued');});

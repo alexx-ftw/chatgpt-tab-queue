@@ -1,6 +1,7 @@
-import {receiptMatches,confirmedReceipt} from './model.mjs';
+import {receiptMatches,confirmedReceipt,targetFromURL} from './model.mjs';
 /** Read-only diagnostic projection. Never include prompts, documents, filenames,
  * binary data, draft backups, attempt tokens, conversation titles or auth state. */
+function tabConversation(url){try{return targetFromURL(url).id;}catch{return null;}}
 const allowed = (value, values, fallback = 'unknown') => values.includes(value) ? value : fallback;
 // Error/alert messages may contain a filename or part of a prompt. Export only
 // controlled categories, never a substring of the original free-form message.
@@ -30,7 +31,7 @@ function surfaceError(error) {
 }
 export async function collectDiagnostics(state,io,version){
  const result={version,generatedAt:new Date().toISOString(),paused:!!state.paused,tabs:[],conversations:[]};
- try{result.tabs=(await io.listTabs()).map(t=>({id:t.id,conversationId:String(t.url||'').match(/\/c\/([a-f0-9-]{20,64})/i)?.[1]||null,status:t.status||'unknown',discarded:!!t.discarded,frozen:!!t.frozen}));}
+ try{result.tabs=(await io.listTabs()).map(t=>({id:t.id,conversationId:tabConversation(t.url),status:t.status||'unknown',discarded:!!t.discarded,frozen:!!t.frozen}));}
  catch{result.tabsUnavailable=true;}
  const ids=new Set([...(state.jobs||[]).map(j=>j.conversationId),...Object.keys(state.helpers||{})]);
  result.conversations=await Promise.all([...ids].slice(0,100).map(async cid=>{
@@ -44,6 +45,7 @@ export async function collectDiagnostics(state,io,version){
     const pending=(state.jobs||[]).find(j=>j.conversationId===cid&&['submitting','uncertain'].includes(j.status));
     const p=await io.page(h.tabId,{cmd:'inspect',conversationId:cid,...(pending?{receiptAfter:pending.attempt?.beforeUser??null,expectedFiles:pending.files||[]}: {})});
     row.surface.page=p?{ready:!!p.ready,interface:interfaceSummary(p.interface),editorMethod:allowed(p.editorMethod,['transaction','textarea','native-edit','unavailable']),conversationId:p.pathId||null,state:allowed(p.state,['idle','busy','unknown']),sendEnabled:!!p.sendEnabled,blocked:!!p.blocked,blocker:reasonCategory(p.blocked),hasUser:!!p.lastUser?.id,hasFinal:!!p.finalId,attachmentCount:p.attachments?.count||0,unsupportedContext:!!p.attachments?.unsupported,effort:allowed(p.model?.effort,['none','minimal','low','medium','high','xhigh','max'],null)}:null;
+    if(p&&['dot-main','dot-replies'].includes(p.surfaceKind)){row.surface.page.surfaceKind=p.surfaceKind;row.surface.page.activitySource=allowed(p.activitySource,['stop','composer-busy','profile-busy','typing','task','profile-idle','unknown']);}
     if(p&&pending)row.surface.page.confirmation={
       baselineFound:p.receiptAnchorFound===true,baselineAmbiguous:p.receiptAnchorAmbiguous===true,
       hasCandidate:!!p.submittedUser?.id,latestMatches:receiptMatches(pending,p.lastUser),
