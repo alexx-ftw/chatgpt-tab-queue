@@ -110,13 +110,19 @@ export function createCoordinator({store,io}) {
       return targetFromURL(tab.url).id===c.id;
     }catch{return false;}
   }
+  async function liveDotDestination(tab,c){
+    if(c.kind!=='dot')return true;
+    if(!tabMatches(tab,c)||tab.discarded||tab.frozen||tab.status==='loading')return false;
+    try{const live=await io.page(tab.id,{cmd:'inspect'});return !!live?.ready&&live.pathId===c.id;}
+    catch{return false;}
+  }
   async function ensureHelper(c,job){
     // Prefer an already loaded conversation; absent chats use a same-origin internal frame.
     // The extension never creates or navigates a browser tab.
     const tabs=(await io.listTabs()).filter(t=>tabMatches(t,c,job));
     tabs.sort((a,b)=>Number(b.id===job?.sourceTabId)-Number(a.id===job?.sourceTabId));
     let tab=tabs.find(t=>!t.discarded&&!t.frozen&&t.status!=='loading')||tabs[0];
-    if(c.kind==='dot'){tab=null;for(const t of tabs){if(t.discarded||t.frozen||t.status==='loading')continue;try{const p=await io.page(t.id,{cmd:'inspect'});if(p?.ready&&p.pathId===c.id){tab=t;break;}}catch{}}}
+    if(c.kind==='dot'){tab=null;for(const t of tabs){if(await liveDotDestination(t,c)){tab=t;break;}}}
     if(!tab&&!c.isNew&&c.kind!=='dot'&&io.ensureBackground)tab=await io.ensureBackground(c,job);
     if(!tab){await note(c.id,c.kind==='dot'?'La cola del dot espera a que esté abierta la misma vista o el mismo hilo Replies. No se abrirá ni cambiará ninguna pestaña.':'Mantén abierta una página de ChatGPT para continuar. No se abrirán pestañas ni se cambiará tu conversación.');return null;}
     const h={tabId:tab.id,conversationId:c.id,jobId:null,url:c.url,owned:false,internal:!!tab.cqFrame};
@@ -289,9 +295,7 @@ export function createCoordinator({store,io}) {
       if(!tab)try{tab=await io.getTab(h.tabId);}catch{}
       // Dots reuse the URL across main/Replies. Revalidate the live scope before
       // keeping a cached helper; another already-open tab may own the right thread.
-      if(tab&&c.kind==='dot'&&!tab.discarded&&!tab.frozen&&tab.status!=='loading'){
-        const live=await io.page(tab.id,{cmd:'inspect'});if(!live?.ready||live.pathId!==cid)tab=null;
-      }
+      if(tab&&!await liveDotDestination(tab,c))tab=null;
       if(tab&&!tabMatches(tab,c,j||jobs[0])&&!(c.isNew&&j&&['submitting','uncertain'].includes(j.status)&&tab.id===j.attempt?.tabId))tab=null;
       if(!tab){
         if(j?.status==='preparing'){
@@ -311,7 +315,9 @@ export function createCoordinator({store,io}) {
       }
     }
     if(!tab&&j?.attempt?.tabId&&['submitting','uncertain'].includes(j.status)){
-      try{const candidate=await io.getTab(j.attempt.tabId);if(tabMatches(candidate,c,j)||c.isNew){tab=candidate;h={tabId:tab.id,conversationId:cid,jobId:j.id,owned:false};await change(s=>{s.helpers[cid]=h;});}}catch{}
+      // Preserve the dispatched attempt, but do not pin receipt recovery to its
+      // old tab when that tab now shows another thread sharing the same URL.
+      try{const candidate=await io.getTab(j.attempt.tabId);if((tabMatches(candidate,c,j)||c.isNew)&&await liveDotDestination(candidate,c)){tab=candidate;h={tabId:tab.id,conversationId:cid,jobId:j.id,owned:false};await change(s=>{s.helpers[cid]=h;});}}catch{}
     }
     // No work means no unnecessary ChatGPT tab. A waiting response is observed without Stop.
     if(!tab){
