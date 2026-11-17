@@ -24,7 +24,8 @@ globalThis.CQPage = function CQPage(args) {
     const setTimeout = pageWorld.setTimeout.bind(pageWorld), clearTimeout = pageWorld.clearTimeout.bind(pageWorld);
     const queueMicrotask = (pageWorld.queueMicrotask || rootWorld.queueMicrotask).bind(pageWorld);
   args=args||{};
-  const FORM='form[data-chatgpt-composer],form[data-type="unified-composer"]';
+  const FORM='form[data-chatgpt-composer],form[data-type="unified-composer"],[data-role="composer"]';
+  const dotKey=location.pathname.match(/^\/dots\/([a-f0-9-]{20,64}~[a-f0-9-]{20,64})\/?$/i)?.[1]||null;
   const EDITOR='[data-composer-markdown][contenteditable="true"],#prompt-textarea[contenteditable="true"],textarea#prompt-textarea,.ProseMirror[contenteditable="true"][role="textbox"]';
   const STOP=/^(stop|stop generating|stop response|detener|detener generación|detener respuesta|parar)$/i;
   const SEND=/^(send|send message|send prompt|enviar|enviar mensaje)$/i;
@@ -35,20 +36,38 @@ globalThis.CQPage = function CQPage(args) {
   const visible=e=>(!selectedFrame||(selectedFrame.isConnected&&pageWorld.document===document))&&!!e?.isConnected&&!e.closest('[hidden],[aria-hidden="true"],[inert]')&&getComputedStyle(e).display!=='none'&&getComputedStyle(e).visibility!=='hidden'&&!!e.getClientRects().length;
   const label=e=>e?.getAttribute('aria-label')||e?.getAttribute('title')||'';
   const enabled=e=>!e.disabled&&e.getAttribute('aria-disabled')!=='true';
-  const allForms=[...document.querySelectorAll(FORM)];
-  const formList=allForms.filter(f=>[...f.querySelectorAll(EDITOR)].some(visible));
+  const allForms=[...document.querySelectorAll(FORM)].filter(f=>!f.matches('[data-role="composer"]')||
+    (dotKey&&f.closest('.reply-chain-container')&&f.querySelector('[data-codex-composer-root]')));
+  const visibleForms=allForms.filter(f=>[...f.querySelectorAll(EDITOR)].some(visible));
+  const replyForms=dotKey?visibleForms.filter(f=>f.closest('.reply-chain-panel[role="dialog"]')):[];
+  // When Replies owns the composer, never choose the main chat behind it.
+  const formList=replyForms.length?replyForms:visibleForms;
   const form=formList.length===1?formList[0]:null,editor=form&&[...form.querySelectorAll(EDITOR)].find(visible);
-  // Read-only local UI lookup. Return DOM nodes only to the caller in this world,
-  // never through extension messaging. The panel and sender share this selection.
-  if(args.cmd==='uiAnchor')return {form,editor,totalForms:allForms.length,visibleForms:formList.length};
-  const pathId=location.pathname.match(/(?:^|\/)c\/([a-f0-9-]{20,64})(?:\/|$)/i)?.[1]||null;
+  const dotForm=!!dotKey&&!!form?.matches('[data-role="composer"]');
+  const replyPanel=dotForm?form.closest('.reply-chain-panel[role="dialog"]'):null;
+  const dotScopes=dotForm?(replyPanel?[...replyPanel.querySelectorAll('[data-role="reply-chain-scroll"]')]:
+    [...(form.closest('.thread-pane')||document).querySelectorAll('[data-role="messages-scroll"]')].filter(e=>!e.closest('.reply-chain-panel'))):[];
+  const dotScope=dotScopes.length===1?dotScopes[0]:null;
+  const dotRows=dotScope?[...dotScope.querySelectorAll('article.message-row[data-message-id]')]:[];
+  const messageKey=/^[a-f0-9]{32}~[a-f0-9]{32}~CalpicoMessage~(?:Sentinel_)?[a-zA-Z0-9_-]{1,160}$/;
+  const replyAnchor=replyPanel?dotRows[0]?.getAttribute('data-message-id'):null;
+  const roomKeys=[...new Set(dotRows.map(e=>e.getAttribute('data-message-id').split('~CalpicoMessage~')[0]))];
+  const dotIdentity=dotForm&&dotScope&&roomKeys.length<=1&&dotRows.every(e=>messageKey.test(e.getAttribute('data-message-id')))&&
+    (!replyPanel||messageKey.test(replyAnchor||''));
+  const pathId=dotKey?(dotIdentity?'dot:'+dotKey+(replyPanel?':reply:'+replyAnchor:':main'):null):
+    location.pathname.match(/(?:^|\/)c\/([a-f0-9-]{20,64})(?:\/|$)/i)?.[1]||null;
+  const allowedDialog=e=>dotForm&&(e===replyPanel||
+    (e.matches('[data-orbit-profile]')&&e.getAttribute('aria-modal')==='false'));
+  const modalBlocked=()=>[...document.querySelectorAll('[role="dialog"],[role="menu"],[role="listbox"]')].some(e=>visible(e)&&!allowedDialog(e));
+  // DOM nodes stay in the caller world. No generic dialog or other composer is exempted.
+  if(args.cmd==='uiAnchor')return {form:dotKey&&!dotIdentity?null:form,editor,totalForms:allForms.length,visibleForms:formList.length,tabBlocked:modalBlocked()};
   const localId=form?.querySelector('[data-above-composer-conversation-id]')?.getAttribute('data-above-composer-conversation-id')||null;
   const route=location.origin+location.pathname;
   function ensureRoute(){
     if(selectedFrame&&(!selectedFrame.isConnected||pageWorld.document!==document))throw Error('El contexto interno cambió o se cerró. No se enviará desde el documento anterior.');
     if(location.origin!=='https://chatgpt.com')throw Error('Dominio inesperado.');
     if(args.conversationId&&!args.conversationId.startsWith('draft:')&&pathId!==args.conversationId)throw Error('La conversación ha cambiado.');
-    if(!editor)throw Error('No se encuentra un único editor activo.');
+    if(!editor||(dotKey&&!dotIdentity))throw Error('No se encuentra un único editor y destino verificado.');
     if(args.localId&&!pathId&&localId!==args.localId)throw Error('El chat nuevo cambió antes de enviar.');
   }
   function pmView(){
@@ -268,13 +287,31 @@ globalThis.CQPage = function CQPage(args) {
   const voice=buttons.find(b=>VOICE.test(label(b)));
   let state=stop?'busy':(send&&enabled(send))||(voice&&enabled(voice))?'idle':'unknown';
   if(form?.getAttribute('aria-busy')==='true')state='busy';
+  let activitySource=null;
+  if(dotForm){
+    const labels=[];
+    for(const profile of document.querySelectorAll('[data-orbit-profile-identity]'))
+      if(visible(profile))for(const p of profile.querySelectorAll('p'))if(visible(p)&&words(p.textContent))labels.push(words(p.textContent));
+    for(const trigger of document.querySelectorAll('[data-orbit-profile-trigger][aria-haspopup="dialog"]'))
+      if(visible(trigger))for(const p of trigger.parentElement?.querySelectorAll('[role="status"]')||[])if(visible(p)&&words(p.textContent))labels.push(words(p.textContent));
+    const composerBusy=form.getAttribute('aria-busy')==='true';
+    const statusBusy=labels.some(s=>/^(thinking|working|pensando|trabajando)(?:[.…]*)$/i.test(s));
+    const knownIdle=labels.length>0&&labels.every(s=>/^(active|idle|ready|available|activo|inactivo|disponible|listo)$/i.test(s));
+    const typing=[...dotScope?.querySelectorAll('.typing-indicator,.typing-bubble')||[]].some(e=>
+      (e.getAttribute('data-visible')==='true'||e.getAttribute('data-active')==='true')&&visible(e));
+    // Loading icons can intentionally be aria-hidden; check their visible owning control.
+    const working=[...dotScope?.querySelectorAll('[data-orbit-thread-only]')||[]].some(e=>
+      visible(e)&&[...e.querySelectorAll('button')].some(b=>visible(b)&&!!b.querySelector('[data-loading-indicator]')));
+    state=stop||composerBusy||statusBusy||typing||working?'busy':knownIdle?'idle':'unknown';
+    activitySource=stop?'stop':composerBusy?'composer-busy':statusBusy?'profile-busy':typing?'typing':working?'task':knownIdle?'profile-idle':'unknown';
+  }
   function messageId(e){const parent=e?.closest('[data-chatgpt-search-message-ids],[data-message-id],[data-turn-key]');return parent?.getAttribute('data-chatgpt-search-message-ids')?.split(' ')[0]||parent?.getAttribute('data-message-id')||parent?.getAttribute('data-turn-key')||null;}
-  const scope=form?.closest('[data-app-shell-focus-area="main"]')||form?.closest('main')||document;
-  const users=[...scope.querySelectorAll('[data-user-message-bubble="true"],[data-message-author-role="user"]')].filter((e,i,a)=>!a.some(x=>x!==e&&e.contains(x)));
+  const scope=dotForm?(dotScope||form):form?.closest('[data-app-shell-focus-area="main"]')||form?.closest('main')||document;
+  const users=dotForm?dotRows.filter(e=>e.matches('.self')):[...scope.querySelectorAll('[data-user-message-bubble="true"],[data-message-author-role="user"]')].filter((e,i,a)=>!a.some(x=>x!==e&&e.contains(x)));
   // Confirm the complete user message, never the first search-highlight block.
   // Reading is local and side-effect free. These variants retain formatting
   // markers; matching never strips punctuation or accepts a substring.
-  const RECEIPT_TEXT='[data-message-text],[data-message-content],.whitespace-pre-wrap,[data-search-result-target],.markdown';
+  const RECEIPT_TEXT=dotForm?'.message-text':'[data-message-text],[data-message-content],.whitespace-pre-wrap,[data-search-result-target],.markdown';
   const receiptExcluded=n=>n?.nodeType===1&&(n.matches('button,[role="button"],svg,script,style,input,textarea,form,[hidden],[aria-hidden="true"],[inert],[data-markdown-copy="exclude"],[data-file-name],[data-composer-attachments]')||getComputedStyle(n).display==='none'||getComputedStyle(n).visibility==='hidden');
   function receiptText(node,markdown=false,preserveLists=false){
     if(node.nodeType===3)return node.nodeValue;
@@ -329,7 +366,10 @@ globalThis.CQPage = function CQPage(args) {
   const lastUser=receipt(users.at(-1));
   const turns=[...scope.querySelectorAll('[data-turn-key]')],turn=turns.at(-1);
   let finalId=null;
-  if(turn&&state==='idle'){
+  if(dotForm&&state==='idle'){
+    const assistant=dotRows.filter(e=>!e.matches('.self')).at(-1);
+    if(assistant&&dotRows.indexOf(assistant)>dotRows.indexOf(users.at(-1)))finalId=messageId(assistant);
+  }else if(turn&&state==='idle'){
     const assistant=[...turn.querySelectorAll('[data-chatgpt-search-unit-key$=":assistant"],[data-message-author-role="assistant"]')].at(-1);
     const finished=[...turn.querySelectorAll('button')].some(b=>/^(regenerate response|regenerate|volver a generar|regenerar respuesta)$/i.test(label(b)));
     if(assistant&&finished)finalId=messageId(assistant);
@@ -339,7 +379,8 @@ globalThis.CQPage = function CQPage(args) {
   }
   let blocked='';
   if(navigator.onLine===false)blocked='Sin conexión';
-  else if([...document.querySelectorAll('[role="dialog"],[role="menu"],[role="listbox"]')].some(visible))blocked='Hay un menú o diálogo abierto';
+  else if(modalBlocked())blocked='Hay un menú o diálogo abierto';
+  else if(dotForm&&!dotIdentity)blocked='No se puede verificar el destino de Replies. El borrador se conserva.';
   const error=[...(turn||form||document).querySelectorAll('[role="alert"],[data-testid="error-message"]')].find(e=>visible(e)&&clean(e.textContent));
   if(error)blocked='Aviso de ChatGPT: '+words(error.textContent).slice(0,220);
   const reasoning=form?.querySelector('[data-selected-reasoning-effort]');
@@ -348,7 +389,7 @@ globalThis.CQPage = function CQPage(args) {
     .filter(visible).map(e=>({label:words(label(e)||e.textContent)}))
     .filter(x=>x.label&&!/^(dictate|dictar|microphone|micrófono|select chatgpt model)$/i.test(x.label)):[];
   const model={engine:modelButton?words(modelButton.textContent):null,effort:reasoning?.getAttribute('data-selected-reasoning-effort')||null,effortLabel:reasoning?words(reasoning.querySelector('[class*="ModelPickerTriggerLabel"]')?.textContent||reasoning.textContent):null};
-  const snapshot={editorMethod:pmView()?'transaction':editor?.tagName==='TEXTAREA'?'textarea':editor?'native-edit':'unavailable',route,pathId,localId,title:document.title.replace(/\s*[-|·]\s*ChatGPT\s*$/i,''),state,sendEnabled:!!send&&enabled(send),text:textOf(editor),attachments:{count:at.count,items:at.items,unsupported:at.unsupported,loading:at.loading,selections:at.selections.map(s=>s.text),selectionError:at.selectionError},blocked,lastUser,finalId,model,options,ready:!!editor,oldUserscript:!!document.getElementById('eros-tab-queue')};
+  const snapshot={editorMethod:pmView()?'transaction':editor?.tagName==='TEXTAREA'?'textarea':editor?'native-edit':'unavailable',route,pathId,localId,surfaceKind:dotForm?(replyPanel?'dot-replies':'dot-main'):'chatgpt',activitySource,title:document.title.replace(/\s*[-|·]\s*ChatGPT\s*$/i,''),state,sendEnabled:!!send&&enabled(send),text:textOf(editor),attachments:{count:at.count,items:at.items,unsupported:at.unsupported,loading:at.loading,selections:at.selections.map(s=>s.text),selectionError:at.selectionError},blocked,lastUser,finalId,model,options,ready:!!editor&&(!dotKey||!!dotIdentity),oldUserscript:!!document.getElementById('eros-tab-queue')};
   // Historical lookup is limited to the first user message after the saved
   // pre-send baseline. Never scan arbitrary old identical messages for a match.
   if(Object.hasOwn(args,'receiptAfter')){
@@ -424,7 +465,7 @@ globalThis.CQPage = function CQPage(args) {
   function startGuard(){
     ensureRoute();const previous=globalThis[GUARD];if(previous){stopGuard(previous);delete globalThis[GUARD];}
     const g={expires:Date.now()+(args.guardMs||300000),token:args.token,conversationId:pathId,text:args.text,backup:capture(),restoring:false,conflict:'',manual:false,listeners:[]};
-    const active=()=>location.pathname.match(/(?:^|\/)c\/([a-f0-9-]{20,64})(?:\/|$)/i)?.[1]===g.conversationId;
+    const active=()=>{const a=CQPage({cmd:'uiAnchor'});if(a.form!==form||a.editor!==editor)return false;return dotKey?CQPage({cmd:'inspect'}).pathId===g.conversationId:location.pathname.match(/(?:^|\/)c\/([a-f0-9-]{20,64})(?:\/|$)/i)?.[1]===g.conversationId;};
     const read=()=>CQPage({cmd:'capture',conversationId:g.conversationId});
     const edited=event=>{
       if(!event.isTrusted||!active()||g.restoring||!event.target?.closest?.(EDITOR))return;
@@ -485,7 +526,7 @@ globalThis.CQPage = function CQPage(args) {
       expires:Date.now()+240000,clicked:false,interrupted:false,listeners:[],readonly:editor.getAttribute('aria-readonly')};
     const intercept=e=>{
       if(!e.isTrusted||!form.contains(e.target))return;
-      const livePath=location.pathname.match(/(?:^|\/)c\/([a-f0-9-]{20,64})(?:\/|$)/i)?.[1]||null;
+      const livePath=dotKey?CQPage({cmd:'inspect'}).pathId:location.pathname.match(/(?:^|\/)c\/([a-f0-9-]{20,64})(?:\/|$)/i)?.[1]||null;
       const liveLocal=form.querySelector('[data-above-composer-conversation-id]')?.getAttribute('data-above-composer-conversation-id')||null;
       if(!g.editor?.isConnected||!g.form?.isConnected||(g.pathId?livePath!==g.pathId:liveLocal!==g.localId)){
         g.interrupted=true;releaseLocal(g);return;

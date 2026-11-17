@@ -62,8 +62,9 @@ async function handle(m,sender){
   case 'CAPTURE':if(who.ui)throw Error('Abre ChatGPT para encolar desde su cuadro.');return page(who.tabId,{cmd:'capture'});
   case 'ENQUEUE':{
    if(who.ui)throw Error('Encola desde el cuadro de ChatGPT.');
-   const tab=await chrome.tabs.get(who.tabId),target=targetFromURL(tab.url,m.target?.isNew?m.target.id:undefined);
+   const tab=await chrome.tabs.get(who.tabId),target=targetFromURL(tab.url,m.target?.id);
    if(target.id!==m.target?.id)throw Error('Has cambiado de conversación mientras se guardaba el mensaje.');
+   if(target.kind==='dot'){const live=await page(who.tabId,{cmd:'inspect'});if(!live?.ready||live.pathId!==target.id)throw Error('El hilo del dot cambió. Tu borrador no se ha tocado.');}
    const files=[];for(const id of m.fileIds||[]){const f=await store.getFile(id);if(!f?.ready||f.owner!==who.owner)throw Error('No se ha guardado un archivo completo. No se ha vaciado el borrador.');files.push(f);}
    const {result:j}=await coordinator.change(s=>addJob(s,{requestId:m.requestId,target:{...target,localId:m.target.localId||null,title:m.target.title},text:m.text,doc:m.doc,files,sourceTabId:who.tabId,model:m.model,options:m.options||[],hold:true}));
    return {id:j.id};

@@ -4,3 +4,6 @@ dist/
 *.key
 .env*
 __pycache__/
+
+# Worktree dependency links are local too.
+/node_modules

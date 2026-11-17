@@ -42,6 +42,48 @@ v0.5.1 database/client modules. It is a data-transfer tool, not an updater.
 Transfer files contain private data: never upload them to this repository.
 The transfer screen currently caps total attachment data at 256 MiB.
 
+## v0.7.0 (preparada): cola para dots y Replies
+
+La cola reconoce el compositor de mensajes de `/dots/` además del compositor de
+conversaciones normales. El chat principal y cada hilo Replies tienen destinos
+separados. La identidad del hilo se vuelve a verificar antes de escribir, adjuntar,
+enviar o restaurar un borrador; cambiar de hilo nunca redirige un pendiente.
+
+- Tab encola texto y archivos capturados desde los controles nativos. Enter sigue
+  enviando de forma nativa; no hay un segundo adjuntador.
+- El panel del perfil y el panel Replies conocidos no se confunden con menús o
+  diálogos modales. Los menús, permisos y otros diálogos conservan Tab y bloquean
+  el envío automático.
+- Thinking, Working, escritura activa, tareas en curso y el compositor ocupado
+  impiden enviar. Un botón Send disponible o los puntos de escritura apagados no
+  prueban que el dot haya terminado. Se requiere un estado de disponibilidad
+  explícito y estable; sin señal reconocida la cola conserva los pendientes.
+- Las confirmaciones leen solo los mensajes propios del mismo transcript, sin
+  incluir marcas de tiempo ni controles. No se reintentan envíos inciertos.
+- Se mantiene el borrador siguiente, también ante una limpieza nativa tardía.
+  Guardar o cancelar una edición conserva la reanudación automática de 0.6.9.
+- Un cambio entre el chat principal y Replies actualiza el destino y el panel.
+  Una pestaña que cambió de hilo no impide usar otra pestaña ya abierta en el
+  destino correcto.
+
+**Alcance de dots:** la vista del dot o el mismo hilo Replies debe seguir cargado
+ en alguna pestaña, que puede estar en segundo plano. Si se cierra o se navega a
+ otro destino, los pendientes esperan sin abrir pestañas, cambiar la conversación
+ visible ni inventar una URL para un hilo. El mensaje raíz debe estar cargado para
+ reconocer Replies. El estado global Thinking puede mantener la espera aunque
+ otra tarea del mismo dot sea la que está trabajando. Las conversaciones normales
+ conservan su transporte interno existente.
+
+Sin permisos nuevos, servicios locales ni cambio del canal de auto-update. Los
+mensajes, adjuntos y pausas existentes no se borran al actualizar. La distribución
+firmada de esta versión todavía no se ha publicado.
+
+Validación: pruebas de modelo, destinos, actividad, confirmación y protección del
+borrador; navegadores aislados con red interceptada y comunicación/almacenamiento
+simulados. No es una validación dentro de una cuenta real. Los bytes de adjuntos
+se comprueban en Chromium; el entorno aislado de Camoufox bloquea el acceso entre
+contextos a File, por lo que esos dos casos se registran como omitidos, no aprobados.
+
 ## v0.6.9: edición con pausa temporal
 
 **Estado de distribución:** publicada como versión estable con paquete CRX firmado y auto-update nativo.

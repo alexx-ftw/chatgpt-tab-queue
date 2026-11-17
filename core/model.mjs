@@ -5,6 +5,13 @@ export const comparable = value => canonical(value).replace(/\s+/g,' ');
 export function targetFromURL(input, draftId) {
   const u=new URL(input);
   if(u.origin!=='https://chatgpt.com'||u.username||u.password) throw Error('Solo se admiten conversaciones de https://chatgpt.com.');
+  const dot=u.pathname.match(/^\/dots\/([a-f0-9-]{20,64}~[a-f0-9-]{20,64})\/?$/i);
+  if(dot){
+    const base='dot:'+dot[1]+':', id=draftId||base+'main';
+    const suffix=typeof id==='string'&&id.startsWith(base)?id.slice(base.length):'';
+    if(suffix!=='main'&&!/^reply:[a-f0-9]{32}~[a-f0-9]{32}~CalpicoMessage~(?:Sentinel_)?[a-zA-Z0-9_-]{1,160}$/.test(suffix))throw Error('El destino Replies no pertenece a este dot.');
+    return {id,url:u.origin+u.pathname.replace(/\/$/,''),isNew:false,kind:'dot'};
+  }
   const m=u.pathname.match(/(?:^|\/)c\/([a-f0-9-]{20,64})(?:\/|$)/i);
   if(m) return {id:m[1],url:u.origin+u.pathname.replace(/\/$/,''),isNew:false};
   if(draftId?.startsWith('draft:') && (u.pathname==='/'||/^\/g\/[a-zA-Z0-9_-]+(?:\/project)?\/?$/.test(u.pathname)))
@@ -43,7 +50,7 @@ export function addJob(s,p,now=Date.now()) {
   if(!p?.target?.id||typeof p.text!=='string'||!Array.isArray(p.files)) throw Error('Mensaje de cola inválido.');
   if(!canonical(p.text)&&!p.files.length) throw Error('Escribe un mensaje o añade un archivo.');
   if(p.text.length>2_000_000||p.files.length>80) throw Error('El mensaje supera el límite local de la cola.');
-  const t=targetFromURL(p.target.url,p.target.isNew?p.target.id:undefined);
+  const t=targetFromURL(p.target.url,p.target.id);
   let id=s.aliases[t.id]||t.id;
   if(!s.conversations[id]) s.conversations[id]={...t,id,localId:p.target.localId||null,title:String(p.target.title||'Chat nuevo').slice(0,250),paused:false,reason:'',waiting:null,nextCheckAt:0};
   const c=s.conversations[id];
