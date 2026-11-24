@@ -221,3 +221,10 @@ test('confirmation timeout does not replace a manual pause applied while submiss
  await f.c.pause(A);await steps(f,24);assert.equal(f.s.jobs[0].status,'uncertain');assert.equal(f.s.jobs[0].reason,ACK_TIMEOUT_REASON);assert.equal(f.s.conversations[A].reason,'Pausa manual');
  await f.c.confirmDelivered(j.id);assert.equal(f.s.conversations[A].paused,true);assert.equal(f.s.jobs.length,0);
 });
+test('a transient missing page does not replace a manual pause on an uncertain send',async()=>{
+ const {f,j}=await opaqueReceiptFixture({manual:true});f.tabs.delete(4);f.pages.delete(4);await steps(f,3);assert.equal(f.s.conversations[A].reason,'Pausa manual');await f.c.confirmDelivered(j.id);assert.equal(f.s.conversations[A].paused,true);
+});
+test('committed confirmation succeeds despite transient file cleanup failure; next tick retries deletion',async()=>{
+ const {f,j}=await opaqueReceiptFixture();await f.store.changeState(s=>{s.jobs[0].files=[{id:'file-a',name:'example.pdf',size:1,type:'application/pdf'}];});f.files.set('file-a',{});let failures=0;const remove=f.store.deleteFile;f.store.deleteFile=async id=>{if(!failures++)throw Error('temporary storage error');return remove(id);};
+ assert.equal(await f.c.confirmDelivered(j.id),true);assert.equal(f.s.jobs.length,0);assert.equal(f.files.size,1);await steps(f,2);assert.equal(f.files.size,0);assert.equal(f.s.history.length,1);
+});

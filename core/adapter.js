@@ -307,7 +307,14 @@ globalThis.CQPage = function CQPage(args) {
   }
   function messageId(e){const parent=e?.closest('[data-chatgpt-search-message-ids],[data-message-id],[data-turn-key]');return parent?.getAttribute('data-chatgpt-search-message-ids')?.split(' ')[0]||parent?.getAttribute('data-message-id')||parent?.getAttribute('data-turn-key')||null;}
   const scope=dotForm?(dotScope||form):form?.closest('[data-app-shell-focus-area="main"]')||form?.closest('main')||document;
-  const users=dotForm?dotRows.filter(e=>e.matches('.self')):[...scope.querySelectorAll('[data-user-message-bubble="true"],[data-message-author-role="user"]')].filter((e,i,a)=>!a.some(x=>x!==e&&e.contains(x)));
+  const primaryUser='[data-user-message-bubble="true"],[data-message-author-role="user"]';
+  const searchUser='[data-chatgpt-search-unit-key$=":user"][data-chatgpt-search-message-ids]';
+  const userCandidates=dotForm?[]:[...scope.querySelectorAll(primaryUser+','+searchUser)].filter(e=>
+    e.matches(primaryUser)||(!!e.getAttribute('data-chatgpt-search-message-ids')?.trim()&&
+      !e.closest(primaryUser)&&!e.querySelector(primaryUser)&&
+      !e.closest('[data-message-author-role="assistant"],[data-chatgpt-search-unit-key$=":assistant"]')&&
+      !e.querySelector('[data-message-author-role="assistant"],[data-chatgpt-search-unit-key$=":assistant"]')));
+  const users=dotForm?dotRows.filter(e=>e.matches('.self')):userCandidates.filter((e,i,a)=>!a.some(x=>x!==e&&e.contains(x)));
   // Confirm the complete user message, never the first search-highlight block.
   // Reading is local and side-effect free. These variants retain formatting
   // markers; matching never strips punctuation or accepts a substring.

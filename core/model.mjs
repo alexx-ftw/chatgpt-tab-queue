@@ -110,7 +110,14 @@ function finishDelivered(s,i,j,c,now,manual=false){
   s.jobs.splice(i,1);
   // A proven late receipt resolves the timeout that paused this lane. Preserve
   // manual/global/import/unknown pauses and other jobs requiring review.
-  if(c.paused&&c.reason===ACK_TIMEOUT_REASON&&j.reason===ACK_TIMEOUT_REASON&&
+  const autoReview=j.status==='uncertain'&&c.reason===j.reason&&(
+    j.reason===ACK_TIMEOUT_REASON||
+    /^Envío incierto; no se repetirá automáticamente\. El borrador queda guardado\. /.test(j.reason)||
+    /^No se sabe si ChatGPT recibió el envío\. No se reintentará solo\. /.test(j.reason)||
+    ['El navegador se cerró durante un posible envío. No se reintentará solo.',
+     'Posible envío de la versión anterior. No se repetirá sin confirmación.',
+     'Actualización durante un posible envío. Se comprobará su confirmación, sin reenviarlo.'].includes(j.reason));
+  if(c.paused&&autoReview&&
      !s.jobs.some(x=>x.conversationId===cid&&['held','error','uncertain','submitting','preparing'].includes(x.status))){
     if(hasEdits(c)){c.editPause.resume=true;c.reason=EDIT_REASON;}
     else{c.paused=false;c.reason='';}

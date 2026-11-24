@@ -7,7 +7,7 @@ export function createCoordinator({store,io}) {
   const running=new Set(),maintained=new Map();
   const enterMaintenance=cid=>{if(!cid)maintenance++;else maintained.set(cid,(maintained.get(cid)||0)+1);};
   const leaveMaintenance=cid=>{if(!cid)maintenance--;else{const n=(maintained.get(cid)||1)-1;if(n)maintained.set(cid,n);else maintained.delete(cid);}};
-  const idle=new Map();
+  const idle=new Map(),pendingFileCleanup=new Set();
   const now=()=>io.now?.()??Date.now();
   const emit=async()=>{try{await io.changed?.();}catch{}};
   const change=async fn=>{const v=await store.changeState(fn);await emit();return v;};
@@ -49,7 +49,15 @@ export function createCoordinator({store,io}) {
   }
   async function deleteUnreferenced(jobs){
     const ids=new Set(jobs.flatMap(j=>j.files.map(f=>f.id)));
-    for(const id of ids){const s=await store.getState();if(!s.jobs.some(j=>j.files.some(f=>f.id===id)))await store.deleteFile(id);}
+    for(const id of ids)pendingFileCleanup.add(id);
+    await retryFileCleanup();
+  }
+  async function retryFileCleanup(){
+    for(const id of [...pendingFileCleanup]){
+      // Confirmation has already committed. A storage cleanup error must not
+      // turn it into a failed send or trigger another dispatch.
+      try{const s=await store.getState();if(!s.jobs.some(j=>j.files.some(f=>f.id===id)))await store.deleteFile(id);pendingFileCleanup.delete(id);}catch{}
+    }
   }
   async function tidy(job){
     if(!job.attempt)return;
@@ -262,8 +270,8 @@ export function createCoordinator({store,io}) {
   }
   async function note(cid,reason){
     const state=await store.getState();
-    if(state.conversations[cid]?.reason===reason)return;
-    await change(s=>{if(s.conversations[cid])s.conversations[cid].reason=reason;});
+    if(!state.conversations[cid]||state.conversations[cid].paused||state.conversations[cid].reason===reason)return;
+    await change(s=>{if(s.conversations[cid]&&!s.conversations[cid].paused)s.conversations[cid].reason=reason;});
   }
   async function lane(cid){
     let s=await store.getState(),c=s.conversations[cid];
@@ -434,6 +442,7 @@ export function createCoordinator({store,io}) {
   }
   async function tick(){
     if(maintenance)return;
+    await retryFileCleanup();
     let s=await store.getState();
     if(s.version!==4||s.helper||!s.helpers){await change(migrateState);s=await store.getState();}
     const ids=new Set([...s.jobs.map(j=>j.conversationId),...Object.keys(s.helpers)]);
