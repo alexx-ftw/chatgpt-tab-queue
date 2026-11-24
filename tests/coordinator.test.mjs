@@ -188,3 +188,36 @@ test('late formatted receipt is acknowledged after update and later manual messa
 test('a late receipt removes the sent job but preserves an explicit manual pause',async()=>{const {f}=await uncertainQuoteFixture({manual:true});await steps(f,12);assert.equal(f.s.jobs.length,0);assert.equal(f.s.conversations[A].paused,true);assert.equal(f.s.conversations[A].reason,'Pausa manual');assert.ok(!f.calls.some(x=>['send','localSend'].includes(x[2])));});
 test('different quoted content remains uncertain and is not retried',async()=>{const {f}=await uncertainQuoteFixture({changed:true});await steps(f,18);assert.equal(f.s.jobs.length,1);assert.equal(f.s.jobs[0].status,'uncertain');assert.equal(f.s.conversations[A].paused,true);assert.ok(!f.calls.some(x=>['send','localSend'].includes(x[2])));});
 test('conversation navigation between two reads cannot acknowledge another chat',async()=>{const {f}=await uncertainQuoteFixture({routeChanged:true});await steps(f,18);assert.equal(f.s.jobs.length,1);assert.equal(f.s.jobs[0].status,'uncertain');assert.equal(f.s.history.length,0);assert.ok(!f.calls.some(x=>['send','localSend'].includes(x[2])));});
+
+// Explicit acknowledgement is a separate, user-initiated decision, not a guessed receipt.
+async function opaqueReceiptFixture({manual=false,second=false}={}){
+ const {ACK_TIMEOUT_REASON}=await import('../core/model.mjs');
+ const f=fixture(),j=f.add(A,'# Selected text:\n\n## Selection 1\n\n> Original quote\n\n## My request:\n\nFollow-up');
+ await f.store.changeState(s=>{markPreparing(s,j.id,4,{lastUser:{id:'old'},finalId:'old-answer'},1);markSubmitting(s,j.id,2);const x=s.jobs[0];x.status='uncertain';x.reason=ACK_TIMEOUT_REASON;s.conversations[A].paused=true;s.conversations[A].reason=manual?'Pausa manual':ACK_TIMEOUT_REASON;});
+ f.pages.get(4).lastUser={id:'sent',text:'Follow-up',files:[]};f.pages.get(4).finalId='finished';
+ if(second)f.add(A,'Next pending');return {f,j};
+}
+test('explicit confirmation of a delivered uncertain job clears only that row and its automatic pause',async()=>{
+ const {f,j}=await opaqueReceiptFixture({second:true});await f.c.confirmDelivered(j.id);
+ assert.equal(f.s.jobs.length,1);assert.equal(f.s.jobs[0].text,'Next pending');assert.equal(f.s.conversations[A].paused,false);assert.equal(f.s.history[0].confirmation,'manual');assert.equal(f.pages.get(4).text,'Estoy escribiendo otro borrador');
+ assert.ok(!f.calls.some(x=>['send','localSend'].includes(x[2])));
+ await steps(f,16);assert.equal(f.s.jobs.length,0);assert.equal(f.calls.filter(x=>['send','localSend'].includes(x[2])).length,1);
+});
+test('explicit confirmation preserves manual and global pauses',async()=>{
+ const {f,j}=await opaqueReceiptFixture({manual:true,second:true});await f.c.pause();await f.c.confirmDelivered(j.id);await steps(f,8);
+ assert.equal(f.s.jobs.length,1);assert.equal(f.s.paused,true);assert.equal(f.s.conversations[A].reason,'Pausa manual');assert.ok(!f.calls.some(x=>['send','localSend'].includes(x[2])));
+});
+test('explicit confirmation is idempotent and cannot discard an unsent queued job',async()=>{
+ const {f,j}=await opaqueReceiptFixture({second:true});const second=f.s.jobs[1].id;await assert.rejects(()=>f.c.confirmDelivered(second));await f.c.confirmDelivered(j.id);await f.c.confirmDelivered(j.id);
+ assert.equal(f.s.jobs.length,1);assert.equal(f.s.history.length,1);assert.equal(f.s.jobs[0].id,second);
+});
+test('an opaque collapsed receipt stays pending until a user explicitly confirms it',async()=>{
+ const {f,j}=await opaqueReceiptFixture({second:true});await steps(f,12);assert.equal(f.s.jobs.length,2);assert.equal(f.s.jobs[0].status,'uncertain');assert.equal(f.s.history.length,0);assert.ok(!f.calls.some(x=>['send','localSend'].includes(x[2])));
+ await f.c.confirmDelivered(j.id);assert.equal(f.s.jobs.length,1);
+});
+test('confirmation timeout does not replace a manual pause applied while submission was in flight',async()=>{
+ const {ACK_TIMEOUT_REASON}=await import('../core/model.mjs');const f=fixture(),j=f.add();
+ await f.store.changeState(s=>{markPreparing(s,j.id,4,{lastUser:{id:'old'}},1);markSubmitting(s,j.id,2);});
+ await f.c.pause(A);await steps(f,24);assert.equal(f.s.jobs[0].status,'uncertain');assert.equal(f.s.jobs[0].reason,ACK_TIMEOUT_REASON);assert.equal(f.s.conversations[A].reason,'Pausa manual');
+ await f.c.confirmDelivered(j.id);assert.equal(f.s.conversations[A].paused,true);assert.equal(f.s.jobs.length,0);
+});

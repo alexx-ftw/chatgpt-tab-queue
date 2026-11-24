@@ -111,6 +111,7 @@ async function handle(m,sender){
   case 'CLEAR_ALL':return coordinator.clear();
   case 'CLEAR_CHAT':return coordinator.clear(m.conversationId);
   case 'REMOVE':return coordinator.remove(m.id);
+  case 'CONFIRM_DELIVERED':{const result=await coordinator.confirmDelivered(m.id);schedule();return result;}
   case 'PAUSE':return coordinator.pause(m.conversationId||null);
   case 'RESUME':await coordinator.resume(m.conversationId||null);schedule();return true;
   case 'RETRY':await coordinator.retry(m.id);schedule();return true;

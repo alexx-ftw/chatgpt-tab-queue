@@ -30,12 +30,15 @@ async function setup({text=quote,body=rendered,later=false,old=false,manual=fals
  const emit=()=>page.evaluate(s=>{globalThis.__fixtureState=s;for(const f of globalThis.__listeners||[])f({channel:'cq2',type:'STATE_CHANGED'},{id:'fixture'},()=>{});},structuredClone(state));
  const io={now:()=>time,listTabs:async()=>[{id:4,url:page.url(),status:'complete'}],getTab:async()=>({id:4,url:page.url(),status:'complete'}),page:async(_id,args)=>{calls.push(args.cmd);return page.evaluate(args=>CQPage(args),args);},sendTab:async()=>({ok:true}),changed:emit};
  const coordinator=createCoordinator({store,io});
+ await page.exposeFunction('__confirmDelivered',id=>coordinator.confirmDelivered(id));
  await page.evaluate(s=>{
-  globalThis.__fixtureState=s;globalThis.__listeners=[];globalThis.__nativeClicks=0;
+  globalThis.__fixtureState=s;globalThis.__listeners=[];globalThis.__nativeClicks=0;globalThis.__reports=0;
   document.querySelector('#native-send').addEventListener('click',()=>__nativeClicks++);
   globalThis.chrome={runtime:{id:'fixture',getManifest:()=>({version:'0.6.7'}),onMessage:{addListener(f){__listeners.push(f);},removeListener(f){__listeners=__listeners.filter(x=>x!==f);}},async sendMessage(m){
    let value=true;if(m.type==='GET_STATE'||m.type==='HELLO')value={...structuredClone(__fixtureState),isHelper:false};
    else if(m.type==='GET_JOB')value=__fixtureState.jobs.find(j=>j.id===m.id);
+   else if(m.type==='REPORT')__reports++;
+   else if(m.type==='CONFIRM_DELIVERED')value=await __confirmDelivered(m.id);
    return {ok:true,value};
   }}};
  },structuredClone(state));
@@ -59,6 +62,9 @@ try{
  await run('manual pause survives verified late confirmation',{manual:true},async t=>{await t.tick();assert.equal(t.state.jobs.length,0);assert.equal(t.state.conversations[A].paused,true);assert.equal(t.state.conversations[A].reason,'Pausa manual');});
  await run('only confirmed row disappears while next queued message waits for response',{busy:true,second:true},async t=>{await t.tick();assert.equal(t.state.jobs.length,1);assert.equal(t.state.jobs[0].text,'Next queued message');assert.equal(await t.page.locator('#cq2-panel .job').count(),1);assert.match(await t.page.locator('#cq2-panel .status').innerText(),/Esperando respuesta/);});
  await run('literal Markdown source remains supported',{body:full(quote)},async t=>{await t.tick();assert.equal(t.state.jobs.length,0);assert.equal(t.state.history.length,1);});
+ await run('collapsed native selection stays safe until the user confirms delivery',{body:'<button aria-label="1 selection">1 selection</button>'+full('Test follow-up')},async t=>{await t.tick();assert.equal(t.state.jobs.length,1);assert.equal(t.state.jobs[0].status,'uncertain');t.page.once('dialog',d=>d.dismiss());await t.page.getByRole('button',{name:'Ya está enviado',exact:true}).click();assert.equal(t.state.jobs.length,1);t.page.once('dialog',d=>d.accept());await t.page.getByRole('button',{name:'Ya está enviado',exact:true}).click();await t.page.waitForFunction(()=>!document.querySelector('#cq2-panel'));assert.equal(t.state.jobs.length,0);assert.equal(t.state.history[0].confirmation,'manual');assert.equal(t.state.conversations[A].paused,false);});
+ await run('new quote envelope automatically clears the confirmed row',{text:quote.replace('# Selected text:','# Quoted context:').replace('## Selection 1','## Excerpt 1').replace('## My request:','## Request:'),body:rendered.replace('Selected text:','Quoted context:').replace('Selection 1','Excerpt 1').replace('My request:','Request:')},async t=>{await t.tick();assert.equal(t.state.jobs.length,0);assert.equal(await t.page.locator('#cq2-panel').count(),0);});
+ await run('new history message schedules a report without a composer state change',{body:full('Different')},async t=>{await t.page.waitForFunction('__reports>0');const before=await t.page.evaluate('__reports');await t.page.evaluate(()=>{const row=document.createElement('div');row.dataset.userMessageBubble='true';row.dataset.messageId='new-history-message';row.textContent='A later message';document.querySelector('main').insertBefore(row,document.querySelector('form'));});await t.page.waitForFunction(n=>__reports>n,before,{timeout:2000});assert.equal(t.state.jobs.length,1);});
  const out={passed:results.filter(r=>r.passed).length,total:results.length,results,errors,environment:'Isolated Camoufox, production DOM adapter/model/coordinator, in-memory storage and mocked extension messaging; no live ChatGPT account.'};
  if(process.env.CQ_RESULTS)writeFileSync(process.env.CQ_RESULTS,JSON.stringify(out,null,2));console.log(JSON.stringify({passed:out.passed,total:out.total,errors}));if(out.passed!==out.total||errors.length)process.exitCode=1;
 }finally{await browser.close();}

@@ -7,7 +7,7 @@ import {receiptMatches} from '../core/model.mjs';
 const esc=s=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
 const card=(n,text='Quoted passage '+n,opener='Selection '+n,remove='Remove selected text '+n)=>`<span class="group/composer-attachment"><span class="composer-attachment-surface"><span class="pointer-events-none"><span class="line-clamp-4 whitespace-pre-wrap">${esc(text)}</span></span><span><svg aria-hidden="true"></svg><span>${opener}</span></span><button type="button" aria-label="${opener}"></button></span><button type="button" aria-label="${remove}"></button></span>`;
 const markup=(cards,body='<p>My request</p>',before='')=>`<html><body><main>${before}<form data-chatgpt-composer><div data-above-composer-portal data-above-composer-conversation-id="chatgpt:local-chatgpt:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"></div><div data-composer-attachments><div>${cards}</div></div><div data-composer-markdown contenteditable="true" role="textbox">${body}</div><button type="button" aria-label="Send"></button></form></main></body></html>`;
-const quote=(ss,request)=>'# Selected text:\n\n'+ss.map((s,i)=>`## Selection ${i+1}\n\n> ${s}`).join('\n\n')+'\n\n## My request:\n\n'+request;
+const quote=(ss,request)=>'# Quoted context:\n\n'+ss.map((s,i)=>`## Excerpt ${i+1}\n\n> ${s}`).join('\n\n')+'\n\n## Request:\n\n'+request;
 function setup(cards,body,before){const x=dom(markup(cards,body,before));vm.runInContext(readFileSync(new URL('../core/file-matching.js',import.meta.url),'utf8'),x.context);return x;}
 for(const [name,cards] of [
  ['numbered English',card(1)+card(2)],['legacy unnumbered',card(1,'One','Selection')+card(2,'Two','Selection')],

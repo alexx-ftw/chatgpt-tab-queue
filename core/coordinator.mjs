@@ -1,5 +1,5 @@
 import {beginQueueEdit,endQueueEdit,hasEdits,retainPause,abandonTabEdits,abandonOwnerEdits,uiEditOwners,missingUIEditOwners,acknowledgeQueueEdit,EDIT_REASON} from './editing.mjs';
-import {canonical,addJob,markPreparing,markSubmitting,acknowledge,confirmedReceipt,ACK_TIMEOUT_REASON,reconcileWait,clearQueue,targetFromURL,migrateState} from './model.mjs';
+import {canonical,addJob,markPreparing,markSubmitting,acknowledge,confirmedReceipt,confirmDelivered as confirmDeliveredState,ACK_TIMEOUT_REASON,reconcileWait,clearQueue,targetFromURL,migrateState} from './model.mjs';
 
 /** Durable per-conversation lanes; browser waits in A never block B. io is the only browser dependency (also used by tests). */
 export function createCoordinator({store,io}) {
@@ -14,7 +14,7 @@ export function createCoordinator({store,io}) {
   const find=(s,id)=>s.jobs.find(j=>j.id===id);
   async function live(id,status=null){const s=await store.getState(),j=find(s,id);return j&&(!status||j.status===status)&&!s.paused&&!s.conversations[j.conversationId]?.paused?j:null;}
   async function fail(id,reason,uncertain=false){
-    const {result:j}=await change(s=>{const x=find(s,id);if(!x)return null;x.status=uncertain?'uncertain':'error';x.reason=String(reason).slice(0,600);const c=s.conversations[x.conversationId];retainPause(c);c.paused=true;c.reason=x.reason;return x;});
+    const {result:j}=await change(s=>{const x=find(s,id);if(!x)return null;x.status=uncertain?'uncertain':'error';x.reason=String(reason).slice(0,600);const c=s.conversations[x.conversationId];retainPause(c);if(!c.paused||!c.reason||c.reason===EDIT_REASON)c.reason=x.reason;c.paused=true;return x;});
     if(j){
       if(j.attempt)try{await io.sendTab(j.attempt.tabId,{channel:'cq2',type:'CANCEL_UPLOAD',token:j.attempt.token});}catch{}
       await endGuards(j);
@@ -71,6 +71,13 @@ export function createCoordinator({store,io}) {
       if(['submitting','uncertain'].includes(j.status)){retainPause(s.conversations[j.conversationId]);s.conversations[j.conversationId].paused=true;s.conversations[j.conversationId].reason='Se retiró un posible envío. Revisa antes de reanudar.';}
       for(const h of Object.values(s.helpers||{}))if(h.jobId===j.id)h.jobId=null;return j;});
     if(j){await tidy(j);await deleteUnreferenced([j]);}return !!j;
+    }finally{leaveMaintenance(scope);}
+  }
+  async function confirmDelivered(id){
+    const initial=await store.getState(),scope=find(initial,id)?.conversationId;if(!scope)return false;
+    enterMaintenance(scope);try{
+      const {result:j}=await change(s=>{const sent=confirmDeliveredState(s,id,now());if(sent)for(const h of Object.values(s.helpers||{}))if(h.jobId===id)h.jobId=null;return sent;});
+      if(j){await endGuards(j);await deleteUnreferenced([j]);}return !!j;
     }finally{leaveMaintenance(scope);}
   }
   async function pause(conversationId=null){
@@ -453,7 +460,7 @@ export function createCoordinator({store,io}) {
     }
     await Promise.all(work);
   }
-  return {tick,clear,remove,pause,resume,retry,uploadResult,change,emit,
+  return {tick,clear,remove,confirmDelivered,pause,resume,retry,uploadResult,change,emit,
     // Enqueue cleanup atomically, even when an EDIT_BEGIN has not committed yet.
     abandonTabEdits:tabId=>change(s=>abandonTabEdits(s,tabId)),
     reconcileUIEdits:async runtime=>{

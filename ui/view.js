@@ -131,7 +131,8 @@
       },'edit');
       v.retry=act('Reintentar pendiente',async()=>{if(confirm('Comprueba que no se haya enviado y revisa el borrador antes de reactivar este pendiente. ¿Continuar?')){await rpc('RETRY',{id:v.job.id});await refresh();}},'retry');
       v.remove=act('Retirar pendiente',async()=>{if(['submitting','uncertain'].includes(v.job.status)&&!confirm('Este mensaje puede haberse enviado ya. ¿Retirarlo solo de la cola, sin borrarlo de ChatGPT?'))return;await rpc('REMOVE',{id:v.job.id});await refresh();},'remove');
-      actions.append(v.copy,v.edit,v.retry,v.remove);
+      v.delivered=act('Ya está enviado',async()=>{if(v.job.status!=='uncertain')return;if(confirm('Confirma solo si ves este mensaje completo (incluidas sus selecciones y archivos) en el chat y su respuesta ya ha terminado. Se retirará este pendiente sin volver a enviarlo. ¿Confirmar?')){await rpc('CONFIRM_DELIVERED',{id:v.job.id});await refresh();}},'check');
+      actions.append(v.copy,v.edit,v.retry,v.delivered,v.remove);
       return v;
     }
     function endEdit(v,d) {
@@ -179,7 +180,7 @@
       text(v.message,job.text||'(Solo adjuntos)');text(v.reason,job.reason||'');v.reason.hidden=!job.reason;
       const fileSig=JSON.stringify(job.files||[]);
       if(fileSig!==v.fileSig){v.fileSig=fileSig;v.files.replaceChildren();for(const f of job.files||[]){const chip=el('span',undefined,'file cq-file');chip.title=f.name;chip.append(icon(String(f.type).startsWith('image/')?'image':'file'),el('span',f.name,'cq-file-name'),el('span',globalThis.CQClient.prettySize(f.size),'cq-file-size'));v.files.append(chip);}}
-      v.files.hidden=!job.files?.length;v.edit.hidden=!['queued','held','error'].includes(job.status);v.retry.hidden=!['held','error'].includes(job.status);
+      v.files.hidden=!job.files?.length;v.edit.hidden=!['queued','held','error'].includes(job.status);v.retry.hidden=!['held','error'].includes(job.status);v.delivered.hidden=job.status!=='uncertain'||v.missing;
       if(drafts.has(job.id)){beginEdit(v,false);if(v.save){v.save.disabled=v.saving||v.missing||!['queued','held','error'].includes(job.status);if(v.missing)text(v.hint,'Ya no está en cola. Tu edición se conserva para copiarla.');}}
     }
     return {

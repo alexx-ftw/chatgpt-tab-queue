@@ -61,3 +61,17 @@ test('a genuinely new chat with no baseline can confirm its first message',()=>{
  const {j}=pending();j.attempt.beforeUser=null;const snap=page(bubble('first',full(quote))).page({cmd:'inspect',receiptAfter:null});
  assert.equal(M.confirmedReceipt(j,snap)?.id,'first');
 });
+
+test('new quote transport stays readable without the special native selection envelope',()=>{
+ const card='<span><span class="whitespace-pre-wrap">Quoted words</span><button aria-label="Selection 1"></button><button aria-label="Remove selected text 1"></button></span>';
+ const x=dom(`<html><body><form data-chatgpt-composer><div data-composer-attachments>${card}</div><div data-composer-markdown contenteditable="true" role="textbox"><p>Follow-up</p></div><button aria-label="Send"></button></form></body></html>`);
+ const captured=x.page({cmd:'capture'});
+ assert.deepEqual(Array.from(captured.attachments.selections),['Quoted words']);
+ assert.equal(captured.queueText,'# Quoted context:\n\n## Excerpt 1\n\n> Quoted words\n\n## Request:\n\nFollow-up');
+ const rendered='<div class="markdown"><h1>Quoted context:</h1><h2>Excerpt 1</h2><blockquote><p>Quoted words</p></blockquote><h2>Request:</h2><p>Follow-up</p></div>';
+ assert.equal(M.receiptMatches(pending(captured.queueText).j,page(bubble('after',rendered)).page().lastUser),true);
+});
+test('a collapsed selection counter and matching request alone cannot prove the whole legacy message',()=>{
+ const {j}=pending();const r=page(bubble('before',full('Previous'))+bubble('after','<button aria-label="1 selection">1 selection</button>'+full('Test follow-up'))).page({cmd:'inspect',receiptAfter:'before'});
+ assert.equal(M.confirmedReceipt(j,r),null);
+});

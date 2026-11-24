@@ -7,7 +7,7 @@ const escape=s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replace
 export const card=(text,n=1,extra='')=>`<span class="group/composer-attachment"><span class="composer-attachment-surface"><span class="pointer-events-none"><span class="line-clamp-4 whitespace-pre-wrap">${escape(text)}</span></span><span><svg aria-hidden="true"></svg><span>Selection</span></span><button aria-label="Selection" type="button"></button></span><button type="button" aria-label="Remove selected text ${n}" ${extra}></button></span>`;
 const file=(name='document.pdf')=>`<span class="group/composer-attachment"><span data-file-name="${name}">${name}</span><button aria-label="Remove ${name}" type="button"></button></span>`;
 export const markup=(cards,request='Compare these options')=>`<html><body><main><form data-chatgpt-composer><div data-above-composer-portal></div><div data-composer-attachments><div class="flex flex-wrap">${cards}</div></div><div contenteditable="true" data-composer-markdown role="textbox"><p>${escape(request)}</p></div><button aria-label="Send" type="button"></button></form></main></body></html>`;
-const pack=(selections,text)=>'# Selected text:\n\n'+selections.map((s,i)=>`## Selection ${i+1}\n\n${s.split('\n').map(l=>'> '+l).join('\n')}`).join('\n\n')+'\n\n## My request:\n\n'+text;
+const pack=(selections,text)=>'# Quoted context:\n\n'+selections.map((s,i)=>`## Excerpt ${i+1}\n\n${s.split('\n').map(l=>'> '+l).join('\n')}`).join('\n\n')+'\n\n## Request:\n\n'+text;
 function setup(cards,request){
  const x=dom(markup(cards,request));vm.runInContext(readFileSync(new URL('../core/file-matching.js',import.meta.url),'utf8'),x.context);
  const e=x.document.querySelector('[data-composer-markdown]'),p=e.querySelector('p');
