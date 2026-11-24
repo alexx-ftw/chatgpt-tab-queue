@@ -204,13 +204,14 @@
   if(snap.attachments.count)seenCards.set(t.id,{...seen,hadCards:true});
   else if(seen.hadCards&&!saving&&Date.now()-(seen.capturedAt||0)>1500){nativeFiles.delete(t.id);seenCards.delete(t.id);}
   const sidebar=globalThis.CQPage({cmd:'sidebar'});
-  const report=JSON.stringify([snap.pathId,snap.state,location.pathname,state.isHelper,sidebar]);
+  const report=JSON.stringify([snap.pathId,snap.state,snap.lastUser?.id||null,snap.finalId||null,location.pathname,state.isHelper,sidebar]);
   if(force||report!==lastReport){lastReport=report;await rpc('REPORT',{pathId:snap.pathId,state:snap.state,sidebar}).catch(()=>{});}
   if(!disposed)render();
  }
  function scheduleHeartbeat(){if(disposed||heartbeatTimer)return;heartbeatTimer=setTimeout(()=>{heartbeatTimer=null;heartbeat().catch(()=>{});},120);}
  function start(){
   heartbeat(true).catch(()=>{});
+  const receiptSelector='[data-user-message-bubble="true"],[data-message-author-role="user"],[data-chatgpt-search-unit-key$=":user"]';
   observer=new MutationObserver(records=>{
    if(records.some(r=>{
     // React may remove only our sibling panel while keeping the same form.
@@ -218,11 +219,13 @@
     if(r.target===host||r.target===toast||host?.contains(r.target))return false;
     const changed=r.target?.nodeType===1?r.target:r.target?.parentElement;
     if(changed?.closest?.(FORM+',.typing-indicator,.typing-bubble,[data-orbit-profile-identity],[data-orbit-profile-trigger],[data-orbit-thread-only],.reply-chain-panel,[data-role="messages-scroll"],[data-role="reply-chain-scroll"]'))return true;
+    // Receipt changes matter independently of the composer. Ignore streaming assistant text.
+    if(state?.jobs?.length&&(changed?.closest?.(receiptSelector)||[...r.addedNodes,...r.removedNodes].some(n=>n.nodeType===1&&(n.matches?.(receiptSelector)||n.querySelector?.(receiptSelector)))))return true;
     if(r.type==='attributes'&&r.target?.querySelector?.(FORM))return true;
     return [...r.addedNodes,...r.removedNodes].some(n=>n.nodeType===1&&(n.matches?.(FORM)||n.querySelector?.(FORM)));
    }))scheduleHeartbeat();
   });
-  observer.observe(document.documentElement,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['aria-label','disabled','aria-disabled','data-map-composer-conversation','data-above-composer-conversation-id','hidden','aria-hidden','inert','class','style','data-visible','data-active','data-message-id']});
+  observer.observe(document.documentElement,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['aria-label','disabled','aria-disabled','data-map-composer-conversation','data-above-composer-conversation-id','hidden','aria-hidden','inert','class','style','data-visible','data-active','data-message-id','data-chatgpt-search-message-ids','data-chatgpt-search-unit-key']});
   interval=setInterval(()=>heartbeat(true).catch(()=>{}),5000);
   for(const name of ['pageshow','online','popstate'])listen(window,name,()=>heartbeat(true).catch(()=>{}));
   listen(document,'visibilitychange',()=>heartbeat(true).catch(()=>{}));

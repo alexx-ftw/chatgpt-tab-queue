@@ -1,0 +1,138 @@
+name: Publish signed extension
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact version from manifest.json (without v)
+        type: string
+        required: true
+      publish:
+        description: Publish to the native update channel (false = tests only)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: signed-extension-release
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.repository == 'alexx-ftw/chatgpt-tab-queue' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Verify requested version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os, json, sys
+          sys.path.insert(0, 'scripts')
+          from verify_release import version, require
+          v = os.environ['VERSION']
+          version(v)
+          for path in ('manifest.json', 'package.json', 'package-lock.json'):
+              require(json.load(open(path))['version'] == v, f'Version mismatch: {path}')
+          PY
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - run: npm run check
+      - run: python3 scripts/test_release.py
+  release:
+    if: inputs.publish && github.repository == 'alexx-ftw/chatgpt-tab-queue' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: crx-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Check release destination and monotonic version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
+          CURRENT="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          export CURRENT
+          python3 - <<'PY'
+          import os, sys
+          sys.path.insert(0, 'scripts')
+          from verify_release import version, require
+          current = os.environ['CURRENT']
+          require(current.startswith('v'), 'Unexpected current release tag')
+          require(version(os.environ['VERSION']) > version(current[1:]), 'Release must be newer than stable')
+          PY
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to overwrite it.' >&2
+            exit 1
+          fi
+          existing="$(git ls-remote --tags origin "refs/tags/v$VERSION")"
+          test -z "$existing"
+      - name: Sign and independently verify bundle
+        env:
+          CRX_SIGNING_KEY: ${{ secrets.CRX_SIGNING_KEY }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CRX_SIGNING_KEY" ]; then
+            echo 'Configure the CRX_SIGNING_KEY environment secret before publishing.' >&2
+            exit 1
+          fi
+          umask 077
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$CRX_SIGNING_KEY" > "$key"
+          unset CRX_SIGNING_KEY
+          python3 scripts/package_release.py --source . --key "$key" --out dist --repository "$GITHUB_REPOSITORY"
+          rm -f "$key"
+          python3 scripts/verify_release.py --source . --bundle dist --repository "$GITHUB_REPOSITORY" --version "$VERSION"
+      - name: Upload to draft and verify assets before publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --title "$tag" --generate-notes \
+            dist/chatgpt-queue.crx dist/chatgpt-queue.zip dist/updates.xml dist/release.json dist/SHA256SUMS
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets,isDraft,tagName > "$RUNNER_TEMP/cq-release-draft.json"
+          python3 - <<'PY'
+          import hashlib, json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          from verify_release import ASSETS, require
+          release = json.loads((Path(os.environ['RUNNER_TEMP'])/'cq-release-draft.json').read_text())
+          require(release['isDraft'] and release['tagName'] == 'v'+os.environ['VERSION'], 'Unexpected release state')
+          require({a['name'] for a in release['assets']} == set(ASSETS) and len(release['assets']) == len(ASSETS), 'Unexpected uploaded assets')
+          for a in release['assets']:
+              data = (Path('dist')/a['name']).read_bytes()
+              require(a['state'] == 'uploaded' and a['size'] == len(data) and a['digest'] == 'sha256:'+hashlib.sha256(data).hexdigest(), f"Upload mismatch: {a['name']}")
+          PY
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+      - name: Verify the anonymous public update channel
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          public="$RUNNER_TEMP/cq-public"
+          mkdir -p "$public"
+          for name in chatgpt-queue.crx chatgpt-queue.zip updates.xml release.json SHA256SUMS; do
+            curl --fail --silent --show-error --location --retry 5 --retry-all-errors "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/$name" -o "$public/$name"
+          done
+          python3 scripts/verify_release.py --source . --bundle "$public" --repository "$GITHUB_REPOSITORY" --version "$VERSION"
+          curl --fail --silent --show-error --location --retry 5 --retry-all-errors "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/updates.xml" -o "$RUNNER_TEMP/latest.xml"
+          cmp "$public/updates.xml" "$RUNNER_TEMP/latest.xml"

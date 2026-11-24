@@ -223,7 +223,7 @@ globalThis.CQPage = function CQPage(args) {
   const sameSelections=(actual,expected)=>Array.isArray(expected)&&actual.length===expected.length&&actual.every((s,i)=>s===expected[i]);
   function quotedMessage(text,selections){
     if(!selections.length)return text;
-    return '# Selected text:\n\n'+selections.map((s,i)=>`## Selection ${i+1}\n\n${s.split('\n').map(line=>'> '+line).join('\n')}`).join('\n\n')+'\n\n## My request:\n\n'+text;
+    return '# Quoted context:\n\n'+selections.map((s,i)=>`## Excerpt ${i+1}\n\n${s.split('\n').map(line=>'> '+line).join('\n')}`).join('\n\n')+'\n\n## Request:\n\n'+text;
   }
   function attachments(){
     if(!form)return {count:0,items:[],unsupported:false,loading:false,remove:[],selections:[],selectionError:''};

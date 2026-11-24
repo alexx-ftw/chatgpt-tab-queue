@@ -68,7 +68,7 @@ async function setup(){
 }
 async function run(name,fn){if(process.env.CQ_CASE&&!name.includes(process.env.CQ_CASE))return;let s;try{s=await setup();await fn(s);results.push({name,passed:true})}catch(e){results.push({name,passed:false,error:e.message})}finally{await s?.close()}console.log(JSON.stringify(results.at(-1)))}
 async function draft(s,html){await s.editor.evaluate((el,h)=>{el.innerHTML='<p>'+h+'</p>';el.dispatchEvent(new Event('input',{bubbles:true}))},html);await s.editor.focus()}
-async function tab(s,text){await s.editor.press('Tab');await s.page.waitForTimeout(750);const jobs=await s.iso('__state.jobs');assert.equal(jobs.length,1);assert.equal(jobs[0].status,'queued');assert.equal(jobs[0].text,text);assert.equal((await s.editor.innerText()).trim(),'');assert.equal(await s.page.evaluate('sent.length'),0);return jobs[0]}const quote=(ss,t)=>'# Selected text:\n\n'+ss.map((s,i)=>`## Selection ${i+1}\n\n${s.split('\n').map(l=>'> '+l).join('\n')}`).join('\n\n')+'\n\n## My request:\n\n'+t;
+async function tab(s,text){await s.editor.press('Tab');await s.page.waitForTimeout(750);const jobs=await s.iso('__state.jobs');assert.equal(jobs.length,1);assert.equal(jobs[0].status,'queued');assert.equal(jobs[0].text,text);assert.equal((await s.editor.innerText()).trim(),'');assert.equal(await s.page.evaluate('sent.length'),0);return jobs[0]}const quote=(ss,t)=>'# Quoted context:\n\n'+ss.map((s,i)=>`## Excerpt ${i+1}\n\n${s.split('\n').map(l=>'> '+l).join('\n')}`).join('\n\n')+'\n\n## Request:\n\n'+t;
 async function selected(s,texts,request='Compare these options'){
  await draft(s,esc(request));await s.page.evaluate(ss=>ss.forEach(t=>window.addSelected(t)),texts);await s.editor.focus();
 }

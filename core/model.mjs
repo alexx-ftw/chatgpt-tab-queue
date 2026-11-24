@@ -101,6 +101,12 @@ export function acknowledge(s,id,user,snapshot,now=Date.now()) {
   }
   c.waiting={receiptId:user.id,beforeFinal:j.attempt.beforeFinal,sawBusy:snapshot.state==='busy',since:now};
   c.nextCheckAt=0;
+  finishDelivered(s,i,j,c,now);
+  return j;
+}
+
+function finishDelivered(s,i,j,c,now,manual=false){
+  const cid=c.id;
   s.jobs.splice(i,1);
   // A proven late receipt resolves the timeout that paused this lane. Preserve
   // manual/global/import/unknown pauses and other jobs requiring review.
@@ -110,7 +116,18 @@ export function acknowledge(s,id,user,snapshot,now=Date.now()) {
     else{c.paused=false;c.reason='';}
   }
   // History is metadata only; sent text and file bytes are not retained in history.
-  s.history.unshift({id:j.id,conversationId:cid,sentAt:now,fileCount:j.files.length});s.history=s.history.slice(0,100);
+  s.history.unshift({id:j.id,conversationId:cid,sentAt:now,fileCount:j.files.length,...(manual?{confirmation:'manual'}:{})});s.history=s.history.slice(0,100);
+}
+
+/** Only after the user explicitly verifies the complete delivered message and finished response.
+ * No synthetic receipt ID, no resend, no clearing existing response waits. */
+export function confirmDelivered(s,id,now=Date.now()){
+  const i=s.jobs.findIndex(j=>j.id===id);
+  if(i<0)return null;
+  const j=s.jobs[i],c=s.conversations[j.conversationId];
+  if(!c||j.status!=='uncertain'||!Number.isFinite(j.attempt?.clickedAt))throw Error('Solo se puede confirmar un posible envío pendiente de revisión.');
+  if(c.isNew)throw Error('Primero debe confirmarse el destino de este chat nuevo. Los pendientes se conservan.');
+  finishDelivered(s,i,j,c,now,true);
   return j;
 }
 export function reconcileWait(s,id,snap,now=Date.now()) {
