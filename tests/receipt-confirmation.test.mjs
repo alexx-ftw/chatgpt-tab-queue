@@ -81,3 +81,18 @@ test('manual delivery confirmation cannot strand an unbound new-chat queue',()=>
  M.markPreparing(s,j.id,4,{},1);M.markSubmitting(s,j.id,2);j.status='uncertain';
  const before=structuredClone(s);assert.throws(()=>M.confirmDelivered(s,j.id),/destino/);assert.deepEqual(s,before);
 });
+test('search-unit-only user receipt with explicit ID is recognized without duplicating nested standard bubbles',()=>{
+ const {j}=pending();const wrap=(id,body)=>`<div data-chatgpt-search-unit-key="turn:0:user" data-chatgpt-search-message-ids="${id}">${body}</div>`;
+ const r=page(wrap('before',bubble('before',full('Previous')))+wrap('after',full(quote))).page({cmd:'inspect',receiptAfter:'before'});
+ assert.equal(r.receiptUserCount,2);assert.equal(M.confirmedReceipt(j,r)?.id,'after');
+});
+test('search-unit fallback never treats an assistant container as a user receipt',()=>{
+ const {j}=pending();const r=page(bubble('before',full('Previous'))+`<div data-message-author-role="assistant"><div data-chatgpt-search-unit-key="turn:0:user" data-chatgpt-search-message-ids="after">${full(quote)}</div></div>`).page({cmd:'inspect',receiptAfter:'before'});
+ assert.equal(M.confirmedReceipt(j,r),null);
+});
+test('a verified delivery can release recognized interrupted-send pauses while preserving unrelated reasons',()=>{
+ for(const reason of ['El navegador se cerró durante un posible envío. No se reintentará solo.','Envío incierto; no se repetirá automáticamente. El borrador queda guardado. Lost response','No se sabe si ChatGPT recibió el envío. No se reintentará solo. Lost response','Pausa manual','Unknown pause']){
+  const {s,j}=pending();j.status='uncertain';j.reason=reason;s.conversations[A].paused=true;s.conversations[A].reason=reason;
+  M.confirmDelivered(s,j.id,5);assert.equal(s.conversations[A].paused,['Pausa manual','Unknown pause'].includes(reason));
+ }
+});

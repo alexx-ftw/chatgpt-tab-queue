@@ -32,7 +32,7 @@ async function setup({text=quote,body=rendered,later=false,old=false,manual=fals
  const coordinator=createCoordinator({store,io});
  await page.exposeFunction('__confirmDelivered',id=>coordinator.confirmDelivered(id));
  await page.evaluate(s=>{
-  globalThis.__fixtureState=s;globalThis.__listeners=[];globalThis.__nativeClicks=0;globalThis.__reports=0;
+  globalThis.__fixtureState=s;globalThis.__listeners=[];globalThis.__nativeClicks=0;globalThis.__reports=0;const realInterval=window.setInterval.bind(window);window.setInterval=(fn,delay,...args)=>delay===5000?0:realInterval(fn,delay,...args);
   document.querySelector('#native-send').addEventListener('click',()=>__nativeClicks++);
   globalThis.chrome={runtime:{id:'fixture',getManifest:()=>({version:'0.6.7'}),onMessage:{addListener(f){__listeners.push(f);},removeListener(f){__listeners=__listeners.filter(x=>x!==f);}},async sendMessage(m){
    let value=true;if(m.type==='GET_STATE'||m.type==='HELLO')value={...structuredClone(__fixtureState),isHelper:false};
