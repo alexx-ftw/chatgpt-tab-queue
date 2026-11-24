@@ -180,7 +180,7 @@
       text(v.message,job.text||'(Solo adjuntos)');text(v.reason,job.reason||'');v.reason.hidden=!job.reason;
       const fileSig=JSON.stringify(job.files||[]);
       if(fileSig!==v.fileSig){v.fileSig=fileSig;v.files.replaceChildren();for(const f of job.files||[]){const chip=el('span',undefined,'file cq-file');chip.title=f.name;chip.append(icon(String(f.type).startsWith('image/')?'image':'file'),el('span',f.name,'cq-file-name'),el('span',globalThis.CQClient.prettySize(f.size),'cq-file-size'));v.files.append(chip);}}
-      v.files.hidden=!job.files?.length;v.edit.hidden=!['queued','held','error'].includes(job.status);v.retry.hidden=!['held','error'].includes(job.status);v.delivered.hidden=job.status!=='uncertain'||v.missing;
+      v.files.hidden=!job.files?.length;v.edit.hidden=!['queued','held','error'].includes(job.status);v.retry.hidden=!['held','error'].includes(job.status);v.delivered.hidden=job.status!=='uncertain'||v.missing||String(job.conversationId||'').startsWith('draft:');
       if(drafts.has(job.id)){beginEdit(v,false);if(v.save){v.save.disabled=v.saving||v.missing||!['queued','held','error'].includes(job.status);if(v.missing)text(v.hint,'Ya no está en cola. Tu edición se conserva para copiarla.');}}
     }
     return {

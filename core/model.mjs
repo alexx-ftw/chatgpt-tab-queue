@@ -126,6 +126,7 @@ export function confirmDelivered(s,id,now=Date.now()){
   if(i<0)return null;
   const j=s.jobs[i],c=s.conversations[j.conversationId];
   if(!c||j.status!=='uncertain'||!Number.isFinite(j.attempt?.clickedAt))throw Error('Solo se puede confirmar un posible envío pendiente de revisión.');
+  if(c.isNew)throw Error('Primero debe confirmarse el destino de este chat nuevo. Los pendientes se conservan.');
   finishDelivered(s,i,j,c,now,true);
   return j;
 }

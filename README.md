@@ -46,7 +46,7 @@ The transfer screen currently caps total attachment data at 256 MiB.
 
 - Las nuevas selecciones se transportan como citas Markdown ordinarias con los encabezados `Quoted context`, `Excerpt` y `Request`, evitando la envoltura anterior `Selected text` / `My request` que puede mostrarse como una tarjeta de selección nativa y ocultar parte del texto a la confirmación DOM. Se conservan todas las citas y su orden. Los pendientes existentes no se reescriben.
 - Una nueva burbuja propia en el historial provoca una comprobación de la cola incluso si el estado de actividad del compositor no ha cambiado. La confirmación sigue exigiendo el contenido completo y el anclaje anterior; ni el contador de selecciones ni una respuesta por sí solos bastan.
-- Si un envío queda incierto, el botón «Ya está enviado» permite retirarlo individualmente después de que el usuario compruebe el mensaje completo y su respuesta terminada. No se reenvía, no se inventa un ID de confirmación y no se retiran otros pendientes. Solo se libera la pausa automática correspondiente; las pausas manuales permanecen, incluso si ocurre un timeout después de pulsar Pausa.
+- Si un envío de una conversación ya vinculada queda incierto, el botón «Ya está enviado» permite retirarlo individualmente después de que el usuario compruebe el mensaje completo y su respuesta terminada. No se reenvía, no se inventa un ID de confirmación y no se retiran otros pendientes. Solo se libera la pausa automática correspondiente; las pausas manuales permanecen, incluso si ocurre un timeout después de pulsar Pausa.
 
 Se preservan los permisos, la firma, la base de datos y el canal nativo de actualizaciones. El cambio de formato es una mitigación de la presentación observada en la captura; no se ha podido inspeccionar la burbuja real de esa sesión. Las pruebas de navegador se ejecutan con páginas sintéticas y mensajería/almacenamiento simulados, no con la cuenta real.
 
@@ -371,3 +371,9 @@ account. See `docs/VERIFICATION.md` for the evidence and restrictions.
 · [Update lifecycle](https://developer.chrome.com/docs/extensions/develop/concepts/extensions-update-lifecycle)
 
 Unofficial project, not affiliated with OpenAI. MIT license.
+
+## Signed releases on GitHub Actions
+
+The `Publish signed extension` workflow runs on `main` only, with an explicit version and publish flag. It runs the full tests, checks the version, signs on a clean hosted runner using the maintainer-configured `CRX_SIGNING_KEY` environment secret in `crx-release`, checks every file and the public identity, and uploads a draft before verifying its asset digests and making it latest. The browser-native auto-update URL and extension ID are unchanged. A dry run does not use a production key or publish.
+
+One-time setup by the repository owner: configure the environment to allow only the `main` branch; enter the existing signing key as its encrypted Actions secret. Never commit the private key, paste it in a chat, or store it in an artifact. This is an optional change to where the key is entrusted; if the owner prefers keeping it exclusively local, the existing local signing procedure remains supported. No workflow can sign with an absent or mismatched key. Review changes on `main` carefully: a trusted workflow with access to the environment can use its secrets. A failed draft is intentionally not overwritten automatically.

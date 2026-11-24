@@ -75,3 +75,9 @@ test('a collapsed selection counter and matching request alone cannot prove the 
  const {j}=pending();const r=page(bubble('before',full('Previous'))+bubble('after','<button aria-label="1 selection">1 selection</button>'+full('Test follow-up'))).page({cmd:'inspect',receiptAfter:'before'});
  assert.equal(M.confirmedReceipt(j,r),null);
 });
+test('manual delivery confirmation cannot strand an unbound new-chat queue',()=>{
+ const s=M.newState(),target={id:'draft:initial',url:'https://chatgpt.com/'};
+ const j=M.addJob(s,{target,text:'First',files:[],sourceTabId:4});M.addJob(s,{target,text:'Second',files:[],sourceTabId:4});
+ M.markPreparing(s,j.id,4,{},1);M.markSubmitting(s,j.id,2);j.status='uncertain';
+ const before=structuredClone(s);assert.throws(()=>M.confirmDelivered(s,j.id),/destino/);assert.deepEqual(s,before);
+});
